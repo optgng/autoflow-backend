@@ -1,0 +1,276 @@
+### Variables
+@baseUrl = http://localhost:8000/api/v1
+@accessToken = 
+@refreshToken = 
+
+### Health Check
+GET http://localhost:8000/health
+
+### ============================================
+### AUTH ENDPOINTS
+### ============================================
+
+### Register new user
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "username": "testuser",
+  "password": "TestPassword123",
+  "full_name": "Test User"
+}
+
+### Login
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "TestPassword123"
+}
+
+### Extract token from login response (for VS Code REST Client)
+@accessToken = {{login.response.body.tokens.access_token}}
+@refreshToken = {{login.response.body.tokens.refresh_token}}
+
+### Get current user info
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+
+### Refresh token
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refreshToken}}"
+}
+
+### Change password
+POST {{baseUrl}}/auth/change-password
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "old_password": "TestPassword123",
+  "new_password": "NewPassword123"
+}
+
+### ============================================
+### ACCOUNT ENDPOINTS
+### ============================================
+
+### Create account
+# @name createAccount
+POST {{baseUrl}}/accounts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Основная карта",
+  "account_type": "card",
+  "currency": "RUB",
+  "balance": "50000.00",
+  "bank_name": "Сбербанк",
+  "last_four_digits": "1234",
+  "icon": "💳",
+  "color": "#FF5733",
+  "include_in_total": true
+}
+
+@accountId = {{createAccount.response.body.id}}
+
+### Get all accounts
+GET {{baseUrl}}/accounts
+Authorization: Bearer {{accessToken}}
+
+### Get account by ID
+GET {{baseUrl}}/accounts/{{accountId}}
+Authorization: Bearer {{accessToken}}
+
+### Get total balance
+GET {{baseUrl}}/accounts/total-balance?currency=RUB
+Authorization: Bearer {{accessToken}}
+
+### Get accounts by type
+GET {{baseUrl}}/accounts/by-type/card
+Authorization: Bearer {{accessToken}}
+
+### Update account
+PATCH {{baseUrl}}/accounts/{{accountId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Основная карта (обновлено)",
+  "balance": "55000.00"
+}
+
+### Create second account for transfers
+# @name createAccount2
+POST {{baseUrl}}/accounts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Накопительный счёт",
+  "account_type": "bank_account",
+  "currency": "RUB",
+  "balance": "100000.00",
+  "bank_name": "Тинькофф",
+  "icon": "🏦",
+  "color": "#FFC300",
+  "include_in_total": true
+}
+
+@accountId2 = {{createAccount2.response.body.id}}
+
+### ============================================
+### CATEGORY ENDPOINTS
+### ============================================
+
+### Get all categories (includes default ones created at registration)
+GET {{baseUrl}}/categories
+Authorization: Bearer {{accessToken}}
+
+### Get expense categories only
+GET {{baseUrl}}/categories?category_type=expense
+Authorization: Bearer {{accessToken}}
+
+### Get income categories only
+GET {{baseUrl}}/categories?category_type=income
+Authorization: Bearer {{accessToken}}
+
+### Create custom category
+# @name createCategory
+POST {{baseUrl}}/categories
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Кафе и рестораны",
+  "category_type": "expense",
+  "icon": "🍽️",
+  "color": "#E74C3C"
+}
+
+@categoryId = {{createCategory.response.body.id}}
+
+### Update category
+PATCH {{baseUrl}}/categories/{{categoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Рестораны и бары",
+  "icon": "🍷"
+}
+
+### ============================================
+### TRANSACTION ENDPOINTS
+### ============================================
+
+### Create expense transaction
+# @name createTransaction
+POST {{baseUrl}}/transactions
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "account_id": {{accountId}},
+  "category_id": 1,
+  "transaction_date": "2026-03-10",
+  "amount": "1500.50",
+  "transaction_type": "expense",
+  "description": "Продукты в Пятёрочке",
+  "merchant": "Пятёрочка",
+  "location": "Москва",
+  "tags": "продукты, еда"
+}
+
+@transactionId = {{createTransaction.response.body.id}}
+
+### Create income transaction
+POST {{baseUrl}}/transactions
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "account_id": {{accountId}},
+  "category_id": 9,
+  "transaction_date": "2026-03-01",
+  "amount": "80000.00",
+  "transaction_type": "income",
+  "description": "Зарплата за февраль",
+  "merchant": "ООО Работодатель"
+}
+
+### Create transfer transaction
+POST {{baseUrl}}/transactions
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "account_id": {{accountId}},
+  "target_account_id": {{accountId2}},
+  "transaction_date": "2026-03-10",
+  "amount": "10000.00",
+  "transaction_type": "transfer",
+  "description": "Перевод на накопительный счёт"
+}
+
+### Get all transactions
+GET {{baseUrl}}/transactions?page=1&page_size=20
+Authorization: Bearer {{accessToken}}
+
+### Get transactions with filters
+GET {{baseUrl}}/transactions?account_id={{accountId}}&transaction_type=expense&date_from=2026-03-01&date_to=2026-03-31
+Authorization: Bearer {{accessToken}}
+
+### Get transaction by ID
+GET {{baseUrl}}/transactions/{{transactionId}}
+Authorization: Bearer {{accessToken}}
+
+### Update transaction
+PATCH {{baseUrl}}/transactions/{{transactionId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "amount": "1600.00",
+  "description": "Продукты в Пятёрочке (обновлено)"
+}
+
+### Search transactions
+GET {{baseUrl}}/transactions?search=Пятёрочка
+Authorization: Bearer {{accessToken}}
+
+### ============================================
+### DASHBOARD ENDPOINT
+### ============================================
+
+### Get dashboard data (last 30 days by default)
+GET {{baseUrl}}/dashboard
+Authorization: Bearer {{accessToken}}
+
+### Get dashboard for specific period
+GET {{baseUrl}}/dashboard?period_start=2026-03-01&period_end=2026-03-31
+Authorization: Bearer {{accessToken}}
+
+### ============================================
+### DELETE OPERATIONS (CLEANUP)
+### ============================================
+
+### Delete transaction
+DELETE {{baseUrl}}/transactions/{{transactionId}}
+Authorization: Bearer {{accessToken}}
+
+### Delete category
+DELETE {{baseUrl}}/categories/{{categoryId}}
+Authorization: Bearer {{accessToken}}
+
+### Delete account
+DELETE {{baseUrl}}/accounts/{{accountId}}
+Authorization: Bearer {{accessToken}}
+
