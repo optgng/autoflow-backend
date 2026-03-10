@@ -27,10 +27,11 @@ class Account(Base):
     """Account model for storing user accounts (cards, wallets, etc)."""
 
     __tablename__ = "accounts"
-
+    __table_args__ = {"schema": "finances"}
+    
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("finances.users.id", ondelete="CASCADE"), nullable=False
     )
 
     # Account details

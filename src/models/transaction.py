@@ -29,21 +29,22 @@ class Transaction(Base):
     """Transaction model."""
 
     __tablename__ = "transactions"
-
+    __table_args__ = {"schema": "finances"}
+    
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
 
     # Foreign keys
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("finances.users.id", ondelete="CASCADE"), nullable=False
     )
     account_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("finances.accounts.id", ondelete="CASCADE"), nullable=False
     )
     category_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
+        Integer, ForeignKey("finances.categories.id", ondelete="SET NULL"), nullable=True
     )
     target_account_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
+        Integer, ForeignKey("finances.accounts.id", ondelete="SET NULL"), nullable=True
     )
 
     # Transaction data
@@ -74,11 +75,6 @@ class Transaction(Base):
         "Account",
         back_populates="transactions",
         foreign_keys=[account_id],  # ← ИСПРАВЛЕНИЕ
-    )
-    
-    target_account: Mapped["Account | None"] = relationship(
-        "Account",
-        foreign_keys=[target_account_id],  # ← ИСПРАВЛЕНИЕ
     )
     
     category: Mapped["Category | None"] = relationship(

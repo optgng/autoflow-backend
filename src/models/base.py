@@ -5,8 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import DateTime, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, declared_attr
 
 class Base(DeclarativeBase):
     @declared_attr.directive
