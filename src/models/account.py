@@ -68,7 +68,7 @@ class Account(Base):
     transactions: Mapped[list["Transaction"]] = relationship(
         "Transaction",
         back_populates="account",
-        foreign_keys="Transaction.account_id",  # ← ИСПРАВЛЕНИЕ
+        foreign_keys="transaction.account_id",  # ← ИСПРАВЛЕНИЕ
         cascade="all, delete-orphan",
     )
 
@@ -81,6 +81,7 @@ class Account(Base):
         ),
         Index("idx_accounts_user", "user_id"),
         Index("idx_accounts_type", "account_type"),
+        {"schema": "finances"}
     )
 
     def __repr__(self) -> str:

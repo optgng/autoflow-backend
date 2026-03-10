@@ -11,7 +11,12 @@ from sqlalchemy.engine import Connection
 
 from src.config import settings                     # <-- твой конфиг
 from src.models.base import Base                    # <-- общий Base
-from src.models import user, account, category, transaction, budget  # noqa: F401
+from src.models.user import User
+
+from src.models.account import Account
+from src.models.category import Category
+from src.models.transaction import Transaction
+from src.models.budget import Budget
 
 config = context.config
 

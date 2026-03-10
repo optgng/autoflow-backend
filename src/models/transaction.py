@@ -43,7 +43,7 @@ class Transaction(Base):
     category_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("finances.categories.id", ondelete="SET NULL"), nullable=True
     )
-    target_account_id: Mapped[int | None] = mapped_column(
+    target_account_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("finances.accounts.id", ondelete="SET NULL"), nullable=True
     )
 
@@ -80,6 +80,11 @@ class Transaction(Base):
     category: Mapped["Category | None"] = relationship(
         "Category",
         back_populates="transactions",
+    )
+
+    target_account: Mapped["Account"] = relationship(
+        "Account",
+        foreign_keys=[target_account_id],  # ← ИСПРАВЛЕНИЕ
     )
 
     # Constraints

@@ -16,7 +16,7 @@ class LegacyUser(Base):
     """Existing finance.users table (read-only)."""
     
     __tablename__ = "users"
-    __table_args__ = {"schema": "finance", "extend_existing": True}
+    __table_args__ = {"schema": "raw_operations", "extend_existing": True}
     
     id: Mapped[UUID] = mapped_column(primary_key=True)
     telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -31,7 +31,7 @@ class LegacyAccount(Base):
     """Existing finance.accounts table (read-only)."""
     
     __tablename__ = "accounts"
-    __table_args__ = {"schema": "finance", "extend_existing": True}
+    __table_args__ = {"schema": "raw_operations", "extend_existing": True}
     
     id: Mapped[UUID] = mapped_column(primary_key=True)
     user_id: Mapped[UUID] = mapped_column(nullable=False)
@@ -49,7 +49,7 @@ class LegacyTransaction(Base):
     """Existing finance.finance_transactions table (read-only)."""
     
     __tablename__ = "finance_transactions"
-    __table_args__ = {"schema": "finance", "extend_existing": True}
+    __table_args__ = {"schema": "raw_operations", "extend_existing": True}
     
     id: Mapped[int] = mapped_column(primary_key=True)
     account_number: Mapped[str] = mapped_column(String(50), nullable=False)

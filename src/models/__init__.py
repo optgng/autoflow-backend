@@ -1,13 +1,17 @@
 """
 Database models.
 """
-from src.models.account import Account
 from src.models.base import Base
-from src.models.budget import Budget
-from src.models.category import Category
-from src.models.legacy import LegacyAccount, LegacyTransaction, LegacyUser
-from src.models.transaction import Transaction
+
+# Базовые модели сначала (без зависимостей)
 from src.models.user import User
+from src.models.account import Account
+from src.models.category import Category  # убедитесь, что есть и импортируется
+
+# Dependent модели после
+from src.models.budget import Budget
+from src.models.transaction import Transaction
+from src.models.legacy import LegacyAccount, LegacyTransaction, LegacyUser
 
 __all__ = [
     "Base",
