@@ -78,6 +78,7 @@ class TransactionService:
         
         # Create transaction
         transaction = await self.transaction_repo.create(
+            user_id=user_id,
             account_id=data.account_id,
             category_id=data.category_id,
             transaction_date=data.transaction_date,

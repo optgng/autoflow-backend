@@ -48,7 +48,7 @@ async def get_total_balance(
     current_user: CurrentUser,
     session: DBSession,
     currency: str = "RUB",
-) -> dict[str, Decimal]:
+    ): 
     """
     Get total balance for current user.
     
@@ -56,6 +56,10 @@ async def get_total_balance(
     """
     service = AccountService(session)
     total = await service.get_total_balance(current_user.id, currency)
+
+    if total is None:
+        total = Decimal("0.00")
+        
     return {"total_balance": total, "currency": currency}
 
 

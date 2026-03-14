@@ -15,7 +15,7 @@ from src.models.base import Base
 from src.app import app
 
 # Test database URL (используем отдельную БД для тестов)
-TEST_DATABASE_URL = settings.DATABASE_URL.replace("/finance", "/finance_test")
+TEST_DATABASE_URL = settings.DATABASE_URL
 
 # Create test engine
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)

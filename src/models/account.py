@@ -21,7 +21,7 @@ from src.models.base import Base
 
 if TYPE_CHECKING:
     from src.models.transaction import Transaction
-
+    from src.models.user import User
 
 class Account(Base):
     """Account model for storing user accounts (cards, wallets, etc)."""
@@ -68,9 +68,11 @@ class Account(Base):
     transactions: Mapped[list["Transaction"]] = relationship(
         "Transaction",
         back_populates="account",
-        foreign_keys="transaction.account_id",  # ← ИСПРАВЛЕНИЕ
+        foreign_keys="Transaction.account_id",  # ← ИСПРАВЛЕНИЕ
         cascade="all, delete-orphan",
     )
+
+    user: Mapped["User"] = relationship("User", back_populates="accounts")
 
     # Constraints
     __table_args__ = (
