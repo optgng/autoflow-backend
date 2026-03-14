@@ -130,8 +130,19 @@ class TransactionService:
         account = await self.account_repo.get_by_id(transaction.account_id)
         if account.user_id != user_id:
             raise AuthorizationError("Access denied to this transaction")
-        
+            
+        # ПРИСВАИВАЕМ связи вручную (Fix бага валидации):
+        transaction.account = account
+        if transaction.category_id:
+            # Импортируем репозиторий, если его еще нет в __init__
+            from src.repositories.category_repo import CategoryRepository
+            category_repo = CategoryRepository(self.session)
+            transaction.category = await category_repo.get_by_id(transaction.category_id)
+        else:
+            transaction.category = None
+            
         return TransactionDetail.model_validate(transaction)
+
 
     async def get_user_transactions(
         self,

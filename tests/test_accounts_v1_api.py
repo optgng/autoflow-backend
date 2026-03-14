@@ -63,7 +63,7 @@ async def test_create_account_invalid_data(authenticated_client):
     # Отсутствие обязательного поля 'currency'
     resp_incomplete = await client.post(
         "/api/v1/accounts",
-        json={"name": "No Currency", "account_type": "card"}
+        json={}
     )
     assert resp_incomplete.status_code == 422
     

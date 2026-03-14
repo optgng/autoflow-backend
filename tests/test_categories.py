@@ -114,3 +114,161 @@ async def test_category_validation_error(authenticated_client):
     )
     assert resp.status_code == 422
 
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_create_category(authenticated_client):
+    client, _ = authenticated_client
+
+    response = await client.post(
+        "/api/v1/categories",
+        json={
+            "name": "Custom Food",
+            "category_type": "expense",
+            "icon": "utensils",
+            "color": "#FF0000",
+        },
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "Custom Food"
+    assert data["category_type"] == "expense"
+
+
+@pytest.mark.asyncio
+async def test_get_categories_default(authenticated_client):
+    client, _ = authenticated_client
+
+    response = await client.get("/api/v1/categories")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) >= 1
+
+
+@pytest.mark.asyncio
+async def test_get_categories_filtered(authenticated_client):
+    client, _ = authenticated_client
+
+    response = await client.get("/api/v1/categories?category_type=income")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert all(item["category_type"] == "income" for item in data)
+
+
+@pytest.mark.asyncio
+async def test_get_categories_without_system(authenticated_client):
+    client, _ = authenticated_client
+
+    await client.post(
+        "/api/v1/categories",
+        json={
+            "name": "Only Mine",
+            "category_type": "expense",
+            "icon": "tag",
+            "color": "#00FF00",
+        },
+    )
+
+    response = await client.get("/api/v1/categories?include_system=false")
+    assert response.status_code == 200
+    data = response.json()
+    assert all(item["is_system"] is False for item in data)
+
+
+@pytest.mark.asyncio
+async def test_update_category(authenticated_client):
+    client, _ = authenticated_client
+
+    create_response = await client.post(
+        "/api/v1/categories",
+        json={
+            "name": "Old Category",
+            "category_type": "expense",
+            "icon": "tag",
+            "color": "#123456",
+        },
+    )
+    category_id = create_response.json()["id"]
+
+    response = await client.patch(
+        f"/api/v1/categories/{category_id}",
+        json={"name": "New Category"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "New Category"
+
+
+@pytest.mark.asyncio
+async def test_delete_category(authenticated_client):
+    client, _ = authenticated_client
+
+    create_response = await client.post(
+        "/api/v1/categories",
+        json={
+            "name": "Delete Category",
+            "category_type": "expense",
+            "icon": "tag",
+            "color": "#654321",
+        },
+    )
+    category_id = create_response.json()["id"]
+
+    response = await client.delete(f"/api/v1/categories/{category_id}")
+    assert response.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_update_system_category_forbidden(authenticated_client):
+    client, _ = authenticated_client
+
+    get_response = await client.get("/api/v1/categories")
+    categories = get_response.json()
+    system_category = next((c for c in categories if c["is_system"] is True), None)
+    if not system_category:
+        pytest.skip("Системные категории не инициализированы в тестовой БД")
+
+    response = await client.patch(
+        f"/api/v1/categories/{system_category['id']}",
+        json={"name": "Hacked"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_delete_system_category_forbidden(authenticated_client):
+    client, _ = authenticated_client
+
+    get_response = await client.get("/api/v1/categories")
+    categories = get_response.json()
+    system_category = next((c for c in categories if c["is_system"] is True), None)
+    if not system_category:
+        pytest.skip("Системные категории не инициализированы в тестовой БД")
+
+    response = await client.delete(f"/api/v1/categories/{system_category['id']}")
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_category_unauthorized(authenticated_client):
+    client, _ = authenticated_client
+    client.headers.pop("Authorization", None)
+
+    response = await client.get("/api/v1/categories")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_category_validation_error(authenticated_client):
+    client, _ = authenticated_client
+
+    response = await client.post(
+        "/api/v1/categories",
+        json={"name": "Broken"},
+    )
+    assert response.status_code == 422
+
