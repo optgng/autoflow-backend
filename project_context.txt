@@ -1,0 +1,4589 @@
+================================================================================
+File path: src/models/legacy.py
+================================================================================
+"""
+Legacy models for reading existing finance.* tables.
+Эти модели ТОЛЬКО ДЛЯ ЧТЕНИЯ, не управляются Alembic.
+"""
+from datetime import date, time
+from decimal import Decimal
+from uuid import UUID
+
+from sqlalchemy import Boolean, Date, String, Time, Numeric, BigInteger
+from sqlalchemy.orm import Mapped, mapped_column
+
+from src.models.base import Base
+
+
+class LegacyUser(Base):
+    """Existing finance.users table (read-only)."""
+    
+    __tablename__ = "users"
+    __table_args__ = {"schema": "raw_operations", "extend_existing": True}
+    
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    username: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
+    def __repr__(self) -> str:
+        return f"<LegacyUser(id={self.id}, email={self.email})>"
+
+
+class LegacyAccount(Base):
+    """Existing finance.accounts table (read-only)."""
+    
+    __tablename__ = "accounts"
+    __table_args__ = {"schema": "raw_operations", "extend_existing": True}
+    
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(nullable=False)
+    account_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    bank_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    is_active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    
+    def __repr__(self) -> str:
+        return f"<LegacyAccount(id={self.id}, name={self.name})>"
+
+
+class LegacyTransaction(Base):
+    """Existing finance.finance_transactions table (read-only)."""
+    
+    __tablename__ = "finance_transactions"
+    __table_args__ = {"schema": "raw_operations", "extend_existing": True}
+    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    date_msk: Mapped[date] = mapped_column(Date, nullable=False)
+    time_msk: Mapped[time] = mapped_column(Time, nullable=False)
+    auth_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    tx_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    balance: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
+    date_operation: Mapped[date | None] = mapped_column(Date, nullable=True)
+    merchant: Mapped[str | None] = mapped_column(nullable=True)
+    
+    def __repr__(self) -> str:
+        return f"<LegacyTransaction(id={self.id}, amount={self.amount})>"
+
+
+
+
+================================================================================
+File path: src/models/user.py
+================================================================================
+"""
+User model.
+"""
+from typing import TYPE_CHECKING, List
+
+from sqlalchemy import Boolean, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from src.models.account import Account
+
+
+class User(Base, TimestampMixin):
+    """User model."""
+    
+    __tablename__ = "users"
+    __table_args__ = {"schema": "finances"}
+    
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    
+    # Relationships
+    accounts: Mapped[List["Account"]] = relationship(
+        "Account",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, email={self.email})>"
+
+
+
+
+================================================================================
+File path: src/models/base.py
+================================================================================
+"""
+Base model with common fields.
+"""
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import DateTime, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, declared_attr
+
+class Base(DeclarativeBase):
+    @declared_attr.directive
+    def __tablename__(cls) -> str:  # если ты не задаёшь __tablename__ явно
+        return cls.__name__.lower()
+
+    __table_args__ = {"schema": "finances"}
+
+class TimestampMixin:
+    """Mixin for created_at and updated_at timestamps."""
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+
+
+================================================================================
+File path: src/models/budget.py
+================================================================================
+"""
+Budget model for expense tracking.
+"""
+from datetime import date
+from decimal import Decimal
+
+from sqlalchemy import Date, ForeignKey, Numeric, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.models.base import Base, TimestampMixin
+from src.models.category import Category
+from src.models.user import User
+
+
+class Budget(Base, TimestampMixin):
+    """Budget model for expense limits."""
+    
+    __tablename__ = "budgets"
+    __table_args__ = {"schema": "finances"}
+    
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("finances.users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("finances.categories.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="NULL for total budget",
+    )
+    
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    period_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        comment="daily, weekly, monthly, yearly",
+    )
+    
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    
+    # Relationships
+    user: Mapped["User"] = relationship("User")
+    category: Mapped["Category"] = relationship("Category")
+    
+    def __repr__(self) -> str:
+        return f"<Budget(id={self.id}, name={self.name}, amount={self.amount})>"
+
+
+
+
+================================================================================
+File path: src/models/category.py
+================================================================================
+"""
+Category model for transactions.
+"""
+from typing import TYPE_CHECKING, List
+
+from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from src.models.transaction import Transaction
+    from src.models.user import User
+
+
+class Category(Base, TimestampMixin):
+    """Transaction category model."""
+    
+    __tablename__ = "categories"
+    __table_args__ = {"schema": "finances"}
+    
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("finances.users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="NULL for system categories",
+    )
+    
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    category_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        comment="income, expense, transfer",
+    )
+    icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    
+    is_system: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="System category (cannot be deleted by user)",
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
+    # Relationships
+    user: Mapped["User"] = relationship("User")
+    transactions: Mapped[List["Transaction"]] = relationship(
+        "Transaction",
+        back_populates="category",
+    )
+    
+    def __repr__(self) -> str:
+        return f"<Category(id={self.id}, name={self.name}, type={self.category_type})>"
+
+
+
+
+================================================================================
+File path: src/models/account.py
+================================================================================
+"""
+Account database model.
+"""
+from datetime import datetime
+from decimal import Decimal
+from typing import TYPE_CHECKING
+
+from sqlalchemy import (
+    DECIMAL,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.models.base import Base
+
+if TYPE_CHECKING:
+    from src.models.transaction import Transaction
+    from src.models.user import User
+
+class Account(Base):
+    """Account model for storing user accounts (cards, wallets, etc)."""
+
+    __tablename__ = "accounts"
+    __table_args__ = {"schema": "finances"}
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("finances.users.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Account details
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    account_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="RUB")
+    balance: Mapped[Decimal] = mapped_column(
+        DECIMAL(15, 2), nullable=False, default=Decimal("0.00")
+    )
+
+    # Optional fields
+    bank_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    account_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_four_digits: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Status
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    include_in_total: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships - ИСПРАВЛЕНО: добавлен foreign_keys
+    transactions: Mapped[list["Transaction"]] = relationship(
+        "Transaction",
+        back_populates="account",
+        foreign_keys="Transaction.account_id",  # ← ИСПРАВЛЕНИЕ
+        cascade="all, delete-orphan",
+    )
+
+    user: Mapped["User"] = relationship("User", back_populates="accounts")
+
+    # Constraints
+    __table_args__ = (
+        CheckConstraint("balance >= 0", name="check_balance_positive"),
+        CheckConstraint(
+            "account_type IN ('card', 'bank_account', 'cash', 'investment', 'crypto', 'other')",
+            name="check_account_type",
+        ),
+        Index("idx_accounts_user", "user_id"),
+        Index("idx_accounts_type", "account_type"),
+        {"schema": "finances"}
+    )
+
+    def __repr__(self) -> str:
+        return f"<Account(id={self.id}, name={self.name}, balance={self.balance})>"
+
+
+
+
+================================================================================
+File path: src/models/transaction.py
+================================================================================
+"""
+Transaction database model.
+"""
+from datetime import date, datetime
+from decimal import Decimal
+from typing import TYPE_CHECKING
+
+from sqlalchemy import (
+    DECIMAL,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.models.base import Base
+
+if TYPE_CHECKING:
+    from src.models.account import Account
+    from src.models.category import Category
+
+
+class Transaction(Base):
+    """Transaction model."""
+
+    __tablename__ = "transactions"
+    __table_args__ = {"schema": "finances"}
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+
+    # Foreign keys
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("finances.users.id", ondelete="CASCADE"), nullable=False
+    )
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("finances.accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    category_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("finances.categories.id", ondelete="SET NULL"), nullable=True
+    )
+    target_account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("finances.accounts.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Transaction data
+    transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(
+        DECIMAL(15, 2), nullable=False, default=Decimal("0.00")
+    )
+    transaction_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Optional fields
+    merchant: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tags: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    receipt_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships - ИСПРАВЛЕНО: добавлен foreign_keys
+    account: Mapped["Account"] = relationship(
+        "Account",
+        back_populates="transactions",
+        foreign_keys=[account_id],  # ← ИСПРАВЛЕНИЕ
+    )
+    
+    category: Mapped["Category | None"] = relationship(
+        "Category",
+        back_populates="transactions",
+    )
+
+    target_account: Mapped["Account"] = relationship(
+        "Account",
+        foreign_keys=[target_account_id],  # ← ИСПРАВЛЕНИЕ
+    )
+
+    # Constraints
+    __table_args__ = (
+        CheckConstraint(
+            "transaction_type IN ('income', 'expense', 'transfer')",
+            name="check_transaction_type",
+        ),
+        CheckConstraint("amount >= 0", name="check_amount_positive"),
+        Index("idx_transactions_user_date", "user_id", "transaction_date"),
+        Index("idx_transactions_account", "account_id"),
+        Index("idx_transactions_category", "category_id"),
+        Index("idx_transactions_type", "transaction_type"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Transaction(id={self.id}, type={self.transaction_type}, amount={self.amount})>"
+
+
+
+
+================================================================================
+File path: src/models/__init__.py
+================================================================================
+"""
+Database models.
+"""
+from src.models.base import Base
+
+# Базовые модели сначала (без зависимостей)
+from src.models.user import User
+from src.models.account import Account
+from src.models.category import Category  # убедитесь, что есть и импортируется
+
+# Dependent модели после
+from src.models.budget import Budget
+from src.models.transaction import Transaction
+from src.models.legacy import LegacyAccount, LegacyTransaction, LegacyUser
+
+__all__ = [
+    "Base",
+    # Новые модели (finances schema)
+    "User",
+    "Account",
+    "Category",
+    "Transaction",
+    "Budget",
+    # Legacy модели (finance schema, read-only)
+    "LegacyUser",
+    "LegacyAccount",
+    "LegacyTransaction",
+]
+
+
+
+
+================================================================================
+File path: src/api/v1/dashboard.py
+================================================================================
+"""
+Transaction endpoints.
+"""
+from fastapi import APIRouter, HTTPException, Query, status
+
+from src.api.deps import CurrentUser, DBSession
+from src.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from src.schemas.base import PaginatedResponse, PaginationParams
+from src.schemas.transaction import (
+    TransactionCreate,
+    TransactionDetail,
+    TransactionFilters,
+    TransactionResponse,
+    TransactionUpdate,
+)
+from src.services.transaction_service import TransactionService
+
+router = APIRouter(prefix="/transactions", tags=["Transactions"])
+
+
+@router.post("", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
+async def create_transaction(
+    data: TransactionCreate,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> TransactionResponse:
+    """
+    Create new transaction.
+    
+    Automatically updates account balance.
+    Requires authentication.
+    """
+    try:
+        service = TransactionService(session)
+        return await service.create_transaction(current_user.id, data)
+    except (NotFoundError, ValidationError) as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("", response_model=PaginatedResponse)
+async def get_transactions(
+    current_user: CurrentUser,
+    session: DBSession,
+    # Filters
+    account_id: int | None = Query(None),
+    category_id: int | None = Query(None),
+    transaction_type: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    min_amount: float | None = Query(None),
+    max_amount: float | None = Query(None),
+    merchant: str | None = Query(None),
+    search: str | None = Query(None),
+    # Pagination
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> PaginatedResponse:
+    """
+    Get transactions with filters and pagination.
+    
+    Requires authentication.
+    """
+    from datetime import date as date_type
+    from decimal import Decimal
+    
+    # Parse dates
+    date_from_parsed = date_type.fromisoformat(date_from) if date_from else None
+    date_to_parsed = date_type.fromisoformat(date_to) if date_to else None
+    
+    filters = TransactionFilters(
+        account_id=account_id,
+        category_id=category_id,
+        transaction_type=transaction_type,
+        date_from=date_from_parsed,
+        date_to=date_to_parsed,
+        min_amount=Decimal(str(min_amount)) if min_amount else None,
+        max_amount=Decimal(str(max_amount)) if max_amount else None,
+        merchant=merchant,
+        search=search,
+    )
+    
+    pagination = PaginationParams(page=page, page_size=page_size)
+    
+    service = TransactionService(session)
+    return await service.get_user_transactions(current_user.id, filters, pagination)
+
+
+@router.get("/{transaction_id}", response_model=TransactionDetail)
+async def get_transaction(
+    transaction_id: int,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> TransactionDetail:
+    """
+    Get transaction by ID with details.
+    
+    Requires authentication and ownership.
+    """
+    try:
+        service = TransactionService(session)
+        return await service.get_transaction(transaction_id, current_user.id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.patch("/{transaction_id}", response_model=TransactionResponse)
+async def update_transaction(
+    transaction_id: int,
+    data: TransactionUpdate,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> TransactionResponse:
+    """
+    Update transaction.
+    
+    Automatically adjusts account balances.
+    Requires authentication and ownership.
+    """
+    try:
+        service = TransactionService(session)
+        return await service.update_transaction(transaction_id, current_user.id, data)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_transaction(
+    transaction_id: int,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> None:
+    """
+    Delete transaction.
+    
+    Automatically reverts account balance changes.
+    Requires authentication and ownership.
+    """
+    try:
+        service = TransactionService(session)
+        await service.delete_transaction(transaction_id, current_user.id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+
+
+================================================================================
+File path: src/api/v1/router.py
+================================================================================
+"""
+Main API v1 router.
+"""
+from fastapi import APIRouter
+
+from src.api.v1 import accounts, auth, categories, dashboard, transactions
+
+api_router = APIRouter()
+
+# Include all routers
+api_router.include_router(auth.router)
+api_router.include_router(accounts.router)
+api_router.include_router(categories.router)
+api_router.include_router(transactions.router)
+api_router.include_router(dashboard.router)
+
+
+
+
+================================================================================
+File path: src/api/v1/categories.py
+================================================================================
+"""
+Category endpoints.
+"""
+from fastapi import APIRouter, HTTPException, status
+
+from src.api.deps import CurrentUser, DBSession
+from src.core.exceptions import AuthorizationError, NotFoundError
+from src.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
+from src.services.category_service import CategoryService
+
+router = APIRouter(prefix="/categories", tags=["Categories"])
+
+
+@router.post("", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
+async def create_category(
+    data: CategoryCreate,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> CategoryResponse:
+    """
+    Create new category.
+    
+    Requires authentication.
+    """
+    service = CategoryService(session)
+    return await service.create_category(current_user.id, data)
+
+
+@router.get("", response_model=list[CategoryResponse])
+async def get_categories(
+    current_user: CurrentUser,
+    session: DBSession,
+    category_type: str | None = None,
+    include_system: bool = True,
+) -> list[CategoryResponse]:
+    """
+    Get categories for current user.
+    
+    Includes system categories by default.
+    Requires authentication.
+    """
+    service = CategoryService(session)
+    return await service.get_user_categories(
+        current_user.id,
+        category_type=category_type,
+        include_system=include_system,
+    )
+
+
+@router.patch("/{category_id}", response_model=CategoryResponse)
+async def update_category(
+    category_id: int,
+    data: CategoryUpdate,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> CategoryResponse:
+    """
+    Update category.
+    
+    Cannot update system categories.
+    Requires authentication and ownership.
+    """
+    try:
+        service = CategoryService(session)
+        return await service.update_category(category_id, current_user.id, data)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_category(
+    category_id: int,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> None:
+    """
+    Delete category.
+    
+    Cannot delete system categories.
+    Requires authentication and ownership.
+    """
+    try:
+        service = CategoryService(session)
+        await service.delete_category(category_id, current_user.id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+
+
+================================================================================
+File path: src/api/v1/auth.py
+================================================================================
+"""
+Authentication endpoints.
+"""
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.api.deps import CurrentUser, DBSession
+from src.core.exceptions import AuthenticationError, ConflictError
+from src.schemas.auth import (
+    AuthResponse,
+    LoginRequest,
+    PasswordChangeRequest,
+    RefreshTokenRequest,
+    RegisterRequest,
+    Token,
+)
+from src.schemas.user import UserResponse
+from src.services.auth_service import AuthService
+
+router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    data: RegisterRequest,
+    session: DBSession,
+) -> AuthResponse:
+    """
+    Register new user.
+    
+    Returns user data and authentication tokens.
+    """
+    try:
+        auth_service = AuthService(session)
+        return await auth_service.register(data)
+    except ConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+
+
+@router.post("/login", response_model=AuthResponse)
+async def login(
+    data: LoginRequest,
+    session: DBSession,
+) -> AuthResponse:
+    """
+    Login user.
+    
+    Returns user data and authentication tokens.
+    """
+    try:
+        auth_service = AuthService(session)
+        return await auth_service.login(data)
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
+
+
+@router.post("/refresh", response_model=Token)
+async def refresh_token(
+    data: RefreshTokenRequest,
+    session: DBSession,
+) -> Token:
+    """
+    Refresh access token using refresh token.
+    
+    Returns new token pair.
+    """
+    try:
+        auth_service = AuthService(session)
+        return await auth_service.refresh_token(data.refresh_token)
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_info(
+    current_user: CurrentUser,
+) -> UserResponse:
+    """
+    Get current user information.
+    
+    Requires authentication.
+    """
+    return UserResponse.model_validate(current_user)
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    data: PasswordChangeRequest,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> None:
+    """
+    Change user password.
+    
+    Requires authentication.
+    """
+    try:
+        auth_service = AuthService(session)
+        await auth_service.change_password(
+            user_id=current_user.id,
+            old_password=data.old_password,
+            new_password=data.new_password,
+        )
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+
+
+================================================================================
+File path: src/api/v1/accounts.py
+================================================================================
+"""
+Account endpoints.
+"""
+from decimal import Decimal
+
+from fastapi import APIRouter, HTTPException, status
+
+from src.api.deps import CurrentUser, DBSession
+from src.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from src.schemas.account import AccountCreate, AccountResponse, AccountUpdate
+from src.services.account_service import AccountService
+
+router = APIRouter(prefix="/accounts", tags=["Accounts"])
+
+
+@router.post("", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
+async def create_account(
+    data: AccountCreate,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> AccountResponse:
+    """
+    Create new account.
+    
+    Requires authentication.
+    """
+    service = AccountService(session)
+    return await service.create_account(current_user.id, data)
+
+
+@router.get("", response_model=list[AccountResponse])
+async def get_accounts(
+    current_user: CurrentUser,
+    session: DBSession,
+    include_inactive: bool = False,
+) -> list[AccountResponse]:
+    """
+    Get all accounts for current user.
+    
+    Requires authentication.
+    """
+    service = AccountService(session)
+    return await service.get_user_accounts(current_user.id, include_inactive)
+
+
+@router.get("/total-balance")
+async def get_total_balance(
+    current_user: CurrentUser,
+    session: DBSession,
+    currency: str = "RUB",
+    ): 
+    """
+    Get total balance for current user.
+    
+    Requires authentication.
+    """
+    service = AccountService(session)
+    total = await service.get_total_balance(current_user.id, currency)
+
+    if total is None:
+        total = Decimal("0.00")
+        
+    return {"total_balance": total, "currency": currency}
+
+
+@router.get("/by-type/{account_type}", response_model=list[AccountResponse])
+async def get_accounts_by_type(
+    account_type: str,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> list[AccountResponse]:
+    """
+    Get accounts by type.
+    
+    Requires authentication.
+    """
+    service = AccountService(session)
+    return await service.get_accounts_by_type(current_user.id, account_type)
+
+
+@router.get("/{account_id}", response_model=AccountResponse)
+async def get_account(
+    account_id: int,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> AccountResponse:
+    """
+    Get account by ID.
+    
+    Requires authentication and ownership.
+    """
+    try:
+        service = AccountService(session)
+        return await service.get_account(account_id, current_user.id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.patch("/{account_id}", response_model=AccountResponse)
+async def update_account(
+    account_id: int,
+    data: AccountUpdate,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> AccountResponse:
+    """
+    Update account.
+    
+    Requires authentication and ownership.
+    """
+    try:
+        service = AccountService(session)
+        return await service.update_account(account_id, current_user.id, data)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    account_id: int,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> None:
+    """
+    Delete account.
+    
+    Requires authentication and ownership.
+    """
+    try:
+        service = AccountService(session)
+        await service.delete_account(account_id, current_user.id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+
+
+================================================================================
+File path: src/api/v1/transactions.py
+================================================================================
+"""
+Transaction endpoints.
+"""
+from fastapi import APIRouter, HTTPException, Query, status
+
+from src.api.deps import CurrentUser, DBSession
+from src.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from src.schemas.base import PaginatedResponse, PaginationParams
+from src.schemas.transaction import (
+    TransactionCreate,
+    TransactionDetail,
+    TransactionFilters,
+    TransactionResponse,
+    TransactionUpdate,
+)
+from src.services.transaction_service import TransactionService
+
+router = APIRouter(prefix="/transactions", tags=["Transactions"])
+
+
+@router.post("", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
+async def create_transaction(
+    data: TransactionCreate,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> TransactionResponse:
+    """
+    Create new transaction.
+    
+    Automatically updates account balance.
+    Requires authentication.
+    """
+    try:
+        service = TransactionService(session)
+        return await service.create_transaction(current_user.id, data)
+    except (NotFoundError, ValidationError) as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("", response_model=PaginatedResponse)
+async def get_transactions(
+    current_user: CurrentUser,
+    session: DBSession,
+    # Filters
+    account_id: int | None = Query(None),
+    category_id: int | None = Query(None),
+    transaction_type: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    min_amount: float | None = Query(None),
+    max_amount: float | None = Query(None),
+    merchant: str | None = Query(None),
+    search: str | None = Query(None),
+    # Pagination
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> PaginatedResponse:
+    """
+    Get transactions with filters and pagination.
+    
+    Requires authentication.
+    """
+    from datetime import date as date_type
+    from decimal import Decimal
+    
+    # Parse dates
+    date_from_parsed = date_type.fromisoformat(date_from) if date_from else None
+    date_to_parsed = date_type.fromisoformat(date_to) if date_to else None
+    
+    filters = TransactionFilters(
+        account_id=account_id,
+        category_id=category_id,
+        transaction_type=transaction_type,
+        date_from=date_from_parsed,
+        date_to=date_to_parsed,
+        min_amount=Decimal(str(min_amount)) if min_amount else None,
+        max_amount=Decimal(str(max_amount)) if max_amount else None,
+        merchant=merchant,
+        search=search,
+    )
+    
+    pagination = PaginationParams(page=page, page_size=page_size)
+    
+    service = TransactionService(session)
+    return await service.get_user_transactions(current_user.id, filters, pagination)
+
+
+@router.get("/{transaction_id}", response_model=TransactionDetail)
+async def get_transaction(
+    transaction_id: int,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> TransactionDetail:
+    """
+    Get transaction by ID with details.
+    
+    Requires authentication and ownership.
+    """
+    try:
+        service = TransactionService(session)
+        return await service.get_transaction(transaction_id, current_user.id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.patch("/{transaction_id}", response_model=TransactionResponse)
+async def update_transaction(
+    transaction_id: int,
+    data: TransactionUpdate,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> TransactionResponse:
+    """
+    Update transaction.
+    
+    Automatically adjusts account balances.
+    Requires authentication and ownership.
+    """
+    try:
+        service = TransactionService(session)
+        return await service.update_transaction(transaction_id, current_user.id, data)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_transaction(
+    transaction_id: int,
+    current_user: CurrentUser,
+    session: DBSession,
+) -> None:
+    """
+    Delete transaction.
+    
+    Automatically reverts account balance changes.
+    Requires authentication and ownership.
+    """
+    try:
+        service = TransactionService(session)
+        await service.delete_transaction(transaction_id, current_user.id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+
+
+================================================================================
+File path: src/api/v1/__init__.py
+================================================================================
+"""
+API v1 endpoints.
+"""
+
+
+
+
+================================================================================
+File path: src/api/deps.py
+================================================================================
+"""
+API dependencies.
+"""
+from typing import Annotated
+
+from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.database import get_async_session
+from src.core.exceptions import AuthenticationError
+from src.models.user import User
+from src.services.auth_service import AuthService
+
+
+async def get_current_user(
+    authorization: Annotated[str | None, Header()] = None,
+    session: AsyncSession = Depends(get_async_session),
+) -> User:
+    """
+    Get current authenticated user from JWT token.
+    
+    Args:
+        authorization: Authorization header (Bearer token)
+        session: Database session
+        
+    Returns:
+        Current user
+        
+    Raises:
+        HTTPException: If authentication fails
+    """
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header missing",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Extract token from "Bearer <token>"
+    try:
+        scheme, token = authorization.split()
+        if scheme.lower() != "bearer":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication scheme",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization header format",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Verify token and get user
+    try:
+        auth_service = AuthService(session)
+        user = await auth_service.get_current_user(token)
+        return user
+    except AuthenticationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+# Type alias for dependency injection
+CurrentUser = Annotated[User, Depends(get_current_user)]
+DBSession = Annotated[AsyncSession, Depends(get_async_session)]
+
+
+
+
+================================================================================
+File path: src/app.py
+================================================================================
+"""
+FastAPI application factory.
+"""
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from src.api.v1.router import api_router
+from src.config import settings
+from src.core.cache import cache
+from src.core.database import close_db, init_db
+from src.core.exceptions import AutoFlowException
+from src.core.logging import get_logger, setup_logging
+
+# Setup logging
+setup_logging()
+logger = get_logger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan events."""
+    # Startup
+    logger.info("Starting AutoFlow Backend", version=settings.APP_VERSION)
+    
+    # Initialize database
+    await init_db()
+    logger.info("Database initialized")
+    
+    # Connect to Redis
+    await cache.connect()
+    logger.info("Redis connected")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down AutoFlow Backend")
+    await cache.disconnect()
+    await close_db()
+    logger.info("Shutdown complete")
+
+
+def create_app() -> FastAPI:
+    """Create and configure FastAPI application."""
+    
+    app = FastAPI(
+        title=settings.APP_NAME,
+        version=settings.APP_VERSION,
+        openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
+        docs_url=f"{settings.API_V1_PREFIX}/docs",
+        redoc_url=f"{settings.API_V1_PREFIX}/redoc",
+        lifespan=lifespan,
+    )
+    
+    # Setup CORS
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.BACKEND_CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    # Exception handler for custom exceptions
+    @app.exception_handler(AutoFlowException)
+    async def autoflow_exception_handler(
+        request: Request, exc: AutoFlowException
+    ) -> JSONResponse:
+        """Handle custom AutoFlow exceptions."""
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "detail": exc.message,
+                "error_data": exc.detail,
+            },
+        )
+    
+    # Health check endpoint
+    @app.get("/health")
+    async def health_check() -> dict[str, str]:
+        """Health check endpoint."""
+        return {
+            "status": "healthy",
+            "version": settings.APP_VERSION,
+            "environment": settings.ENVIRONMENT,
+        }
+    
+    # Include API routers
+    app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+    
+    return app
+
+
+# Create app instance
+app = create_app()
+
+
+
+
+================================================================================
+File path: src/config.py
+================================================================================
+"""
+Application configuration using Pydantic Settings.
+"""
+from functools import lru_cache
+from typing import List, Literal
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # Application
+    APP_NAME: str = "AutoFlow Finance Backend"
+    APP_VERSION: str = "0.1.0"
+    DEBUG: bool = False
+    ENVIRONMENT: Literal["development", "staging", "production"] = "development"
+
+    # API
+    API_V1_PREFIX: str = "/api/v1"
+    BACKEND_CORS_ORIGINS: List[str] = Field(
+        default_factory=lambda: ["http://localhost:3000"]
+    )
+
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: str | List[str]) -> List[str]:
+        """Parse CORS origins."""
+        if isinstance(v, str):
+            # Если строка начинается с [, парсим как JSON
+            if v.startswith("["):
+                import json
+                return json.loads(v)
+            # Иначе разбиваем по запятой
+            return [i.strip() for i in v.split(",")]
+        return v
+
+    # Database
+    DATABASE_URL: str
+    DATABASE_ECHO: bool = False
+    DATABASE_POOL_SIZE: int = 20
+    DATABASE_MAX_OVERFLOW: int = 10
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def validate_database_url(cls, v: str) -> str:
+        """Validate database URL format."""
+        if not v:
+            raise ValueError("DATABASE_URL cannot be empty")
+        if not v.startswith(("postgresql://", "postgresql+asyncpg://")):
+            raise ValueError("DATABASE_URL must start with postgresql:// or postgresql+asyncpg://")
+        return v
+
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_CACHE_TTL: int = 3600
+
+    @field_validator("REDIS_URL", mode="before")
+    @classmethod
+    def validate_redis_url(cls, v: str) -> str:
+        """Validate Redis URL format."""
+        if not v:
+            raise ValueError("REDIS_URL cannot be empty")
+        if not v.startswith("redis://"):
+            raise ValueError("REDIS_URL must start with redis://")
+        return v
+
+    # Security
+    SECRET_KEY: str = Field(min_length=32)
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # Celery
+    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+
+    @field_validator("CELERY_BROKER_URL", "CELERY_RESULT_BACKEND", mode="before")
+    @classmethod
+    def validate_celery_url(cls, v: str) -> str:
+        """Validate Celery Redis URL format."""
+        if not v:
+            raise ValueError("Celery URL cannot be empty")
+        if not v.startswith("redis://"):
+            raise ValueError("Celery URL must start with redis://")
+        return v
+
+    # LLM
+    LLM_PROVIDER: Literal["openai", "anthropic", "ollama"] = "openai"
+    OPENAI_API_KEY: str | None = None
+    ANTHROPIC_API_KEY: str | None = None
+    OLLAMA_BASE_URL: str | None = None
+
+    # Logging
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    LOG_FORMAT: Literal["json", "text"] = "json"
+
+    # Telegram
+    TELEGRAM_BOT_TOKEN: str | None = None
+    TELEGRAM_WEBHOOK_URL: str | None = None
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Get cached settings instance."""
+    return Settings()
+
+
+settings = get_settings()
+
+
+
+
+================================================================================
+File path: src/repositories/user_repo.py
+================================================================================
+"""
+User repository.
+"""
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.models.user import User
+from src.repositories.base import BaseRepository
+
+
+class UserRepository(BaseRepository[User]):
+    """Repository for User model."""
+
+    def __init__(self, session: AsyncSession):
+        super().__init__(User, session)
+
+    async def get_by_email(self, email: str) -> User | None:
+        """
+        Get user by email.
+        
+        Args:
+            email: User email
+            
+        Returns:
+            User instance or None
+        """
+        result = await self.session.execute(
+            select(User).where(User.email == email)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_username(self, username: str) -> User | None:
+        """
+        Get user by username.
+        
+        Args:
+            username: Username
+            
+        Returns:
+            User instance or None
+        """
+        result = await self.session.execute(
+            select(User).where(User.username == username)
+        )
+        return result.scalar_one_or_none()
+
+    async def email_exists(self, email: str, exclude_id: int | None = None) -> bool:
+        """
+        Check if email is already taken.
+        
+        Args:
+            email: Email to check
+            exclude_id: User ID to exclude from check (for updates)
+            
+        Returns:
+            True if email exists, False otherwise
+        """
+        query = select(User).where(User.email == email)
+        
+        if exclude_id is not None:
+            query = query.where(User.id != exclude_id)
+        
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none() is not None
+
+    async def username_exists(
+        self, username: str, exclude_id: int | None = None
+    ) -> bool:
+        """
+        Check if username is already taken.
+        
+        Args:
+            username: Username to check
+            exclude_id: User ID to exclude from check (for updates)
+            
+        Returns:
+            True if username exists, False otherwise
+        """
+        query = select(User).where(User.username == username)
+        
+        if exclude_id is not None:
+            query = query.where(User.id != exclude_id)
+        
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none() is not None
+
+    async def get_active_users(self, skip: int = 0, limit: int = 100) -> list[User]:
+        """
+        Get all active users.
+        
+        Args:
+            skip: Number of records to skip
+            limit: Maximum number of records
+            
+        Returns:
+            List of active users
+        """
+        result = await self.session.execute(
+            select(User)
+            .where(User.is_active == True)  # noqa: E712
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+
+
+
+================================================================================
+File path: src/repositories/category_repo.py
+================================================================================
+"""
+Category repository.
+"""
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.models.category import Category
+from src.repositories.base import BaseRepository
+
+
+class CategoryRepository(BaseRepository[Category]):
+    """Repository for Category model."""
+
+    def __init__(self, session: AsyncSession):
+        super().__init__(Category, session)
+
+    async def get_user_categories(
+        self,
+        user_id: int,
+        category_type: str | None = None,
+        include_system: bool = True,
+    ) -> list[Category]:
+        """
+        Get categories for user (including system categories).
+        
+        Args:
+            user_id: User ID
+            category_type: Filter by type (income/expense/transfer)
+            include_system: Include system categories
+            
+        Returns:
+            List of categories
+        """
+        query = select(Category).where(Category.is_active == True)  # noqa: E712
+        
+        if include_system:
+            # User's own categories OR system categories
+            query = query.where(
+                or_(Category.user_id == user_id, Category.is_system == True)  # noqa: E712
+            )
+        else:
+            query = query.where(Category.user_id == user_id)
+        
+        if category_type:
+            query = query.where(Category.category_type == category_type)
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_system_categories(
+        self, category_type: str | None = None
+    ) -> list[Category]:
+        """
+        Get system categories.
+        
+        Args:
+            category_type: Filter by type
+            
+        Returns:
+            List of system categories
+        """
+        query = select(Category).where(Category.is_system == True)  # noqa: E712
+        
+        if category_type:
+            query = query.where(Category.category_type == category_type)
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_by_name_and_type(
+        self, user_id: int, name: str, category_type: str
+    ) -> Category | None:
+        """
+        Get category by name and type.
+        
+        Args:
+            user_id: User ID
+            name: Category name
+            category_type: Category type
+            
+        Returns:
+            Category or None
+        """
+        result = await self.session.execute(
+            select(Category)
+            .where(Category.user_id == user_id)
+            .where(Category.name == name)
+            .where(Category.category_type == category_type)
+        )
+        return result.scalar_one_or_none()
+
+    async def create_default_categories(self, user_id: int) -> list[Category]:
+        """
+        Create default categories for new user.
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            List of created categories
+        """
+        default_categories = [
+            # Expense categories
+            {"name": "Продукты", "category_type": "expense", "icon": "🛒"},
+            {"name": "Транспорт", "category_type": "expense", "icon": "🚗"},
+            {"name": "Развлечения", "category_type": "expense", "icon": "🎉"},
+            {"name": "Здоровье", "category_type": "expense", "icon": "💊"},
+            {"name": "Одежда", "category_type": "expense", "icon": "👕"},
+            {"name": "Коммунальные", "category_type": "expense", "icon": "🏠"},
+            {"name": "Образование", "category_type": "expense", "icon": "📚"},
+            {"name": "Прочее", "category_type": "expense", "icon": "📦"},
+            # Income categories
+            {"name": "Зарплата", "category_type": "income", "icon": "💰"},
+            {"name": "Фриланс", "category_type": "income", "icon": "💻"},
+            {"name": "Инвестиции", "category_type": "income", "icon": "📈"},
+            {"name": "Подарки", "category_type": "income", "icon": "🎁"},
+            {"name": "Прочее", "category_type": "income", "icon": "💵"},
+        ]
+        
+        created = []
+        for cat_data in default_categories:
+            category = await self.create(user_id=user_id, **cat_data)
+            created.append(category)
+        
+        return created
+
+
+
+
+================================================================================
+File path: src/repositories/transaction_repo.py
+================================================================================
+"""
+Transaction repository.
+"""
+from datetime import date
+from decimal import Decimal
+
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from src.models.transaction import Transaction
+from src.repositories.base import BaseRepository
+
+
+class TransactionRepository(BaseRepository[Transaction]):
+    """Repository for Transaction model."""
+
+    def __init__(self, session: AsyncSession):
+        super().__init__(Transaction, session)
+
+    async def get_user_transactions(
+        self,
+        user_id: int,
+        account_id: int | None = None,
+        category_id: int | None = None,
+        transaction_type: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Transaction]:
+        """
+        Get transactions with filters.
+        
+        Args:
+            user_id: User ID (for security)
+            account_id: Filter by account
+            category_id: Filter by category
+            transaction_type: Filter by type
+            date_from: Start date
+            date_to: End date
+            skip: Offset
+            limit: Limit
+            
+        Returns:
+            List of transactions
+        """
+        from src.models.account import Account
+        
+        query = (
+            select(Transaction)
+            .join(Account, Transaction.account_id == Account.id)
+            .where(Account.user_id == user_id)
+            .options(
+                selectinload(Transaction.account),
+                selectinload(Transaction.category),
+                selectinload(Transaction.target_account),
+            )
+        )
+        
+        if account_id:
+            query = query.where(Transaction.account_id == account_id)
+        
+        if category_id:
+            query = query.where(Transaction.category_id == category_id)
+        
+        if transaction_type:
+            query = query.where(Transaction.transaction_type == transaction_type)
+        
+        if date_from:
+            query = query.where(Transaction.transaction_date >= date_from)
+        
+        if date_to:
+            query = query.where(Transaction.transaction_date <= date_to)
+        
+        query = query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+        query = query.offset(skip).limit(limit)
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_total_by_type(
+        self,
+        user_id: int,
+        transaction_type: str,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        account_id: int | None = None,
+    ) -> Decimal:
+        """
+        Get total amount by transaction type.
+        
+        Args:
+            user_id: User ID
+            transaction_type: Transaction type
+            date_from: Start date
+            date_to: End date
+            account_id: Filter by account
+            
+        Returns:
+            Total amount
+        """
+        from src.models.account import Account
+        
+        query = (
+            select(func.sum(Transaction.amount))
+            .join(Account, Transaction.account_id == Account.id)
+            .where(Account.user_id == user_id)
+            .where(Transaction.transaction_type == transaction_type)
+        )
+        
+        if date_from:
+            query = query.where(Transaction.transaction_date >= date_from)
+        
+        if date_to:
+            query = query.where(Transaction.transaction_date <= date_to)
+        
+        if account_id:
+            query = query.where(Transaction.account_id == account_id)
+        
+        result = await self.session.execute(query)
+        total = result.scalar_one_or_none()
+        return total if total is not None else Decimal("0.00")
+
+    async def get_by_category(
+        self,
+        user_id: int,
+        category_id: int,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> list[Transaction]:
+        """
+        Get transactions by category.
+        
+        Args:
+            user_id: User ID
+            category_id: Category ID
+            date_from: Start date
+            date_to: End date
+            
+        Returns:
+            List of transactions
+        """
+        from src.models.account import Account
+        
+        query = (
+            select(Transaction)
+            .join(Account, Transaction.account_id == Account.id)
+            .where(Account.user_id == user_id)
+            .where(Transaction.category_id == category_id)
+        )
+        
+        if date_from:
+            query = query.where(Transaction.transaction_date >= date_from)
+        
+        if date_to:
+            query = query.where(Transaction.transaction_date <= date_to)
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def search_transactions(
+        self,
+        user_id: int,
+        search_term: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Transaction]:
+        """
+        Search transactions by description or merchant.
+        
+        Args:
+            user_id: User ID
+            search_term: Search term
+            skip: Offset
+            limit: Limit
+            
+        Returns:
+            List of transactions
+        """
+        from src.models.account import Account
+        
+        query = (
+            select(Transaction)
+            .join(Account, Transaction.account_id == Account.id)
+            .where(Account.user_id == user_id)
+            .where(
+                or_(
+                    Transaction.description.ilike(f"%{search_term}%"),
+                    Transaction.merchant.ilike(f"%{search_term}%"),
+                    Transaction.notes.ilike(f"%{search_term}%"),
+                )
+            )
+            .order_by(Transaction.transaction_date.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_recent_transactions(
+        self, user_id: int, limit: int = 10
+    ) -> list[Transaction]:
+        """
+        Get recent transactions for user.
+        
+        Args:
+            user_id: User ID
+            limit: Number of transactions
+            
+        Returns:
+            List of recent transactions
+        """
+        from src.models.account import Account
+        
+        query = (
+            select(Transaction)
+            .join(Account, Transaction.account_id == Account.id)
+            .where(Account.user_id == user_id)
+            .options(
+                selectinload(Transaction.account),
+                selectinload(Transaction.category),
+            )
+            .order_by(Transaction.created_at.desc())
+            .limit(limit)
+        )
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+
+
+
+================================================================================
+File path: src/repositories/account_repo.py
+================================================================================
+"""
+Account repository.
+"""
+from decimal import Decimal
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.models.account import Account
+from src.repositories.base import BaseRepository
+
+
+class AccountRepository(BaseRepository[Account]):
+    """Repository for Account model."""
+
+    def __init__(self, session: AsyncSession):
+        super().__init__(Account, session)
+
+    async def get_user_accounts(
+        self,
+        user_id: int,
+        include_inactive: bool = False,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Account]:
+        """
+        Get all accounts for a user.
+        
+        Args:
+            user_id: User ID
+            include_inactive: Include inactive accounts
+            skip: Number of records to skip
+            limit: Maximum number of records
+            
+        Returns:
+            List of accounts
+        """
+        query = select(Account).where(Account.user_id == user_id)
+        
+        if not include_inactive:
+            query = query.where(Account.is_active == True)  # noqa: E712
+        
+        query = query.offset(skip).limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_total_balance(
+        self, user_id: int, currency: str = "RUB"
+    ) -> Decimal:
+        """
+        Calculate total balance for user's accounts.
+        
+        Args:
+            user_id: User ID
+            currency: Currency filter
+            
+        Returns:
+            Total balance
+        """
+        result = await self.session.execute(
+            select(func.sum(Account.balance))
+            .where(Account.user_id == user_id)
+            .where(Account.currency == currency)
+            .where(Account.is_active == True)  # noqa: E712
+            .where(Account.include_in_total == True)  # noqa: E712
+        )
+        total = result.scalar_one_or_none()
+        return total if total is not None else Decimal("0.00")
+
+    async def get_by_type(
+        self, user_id: int, account_type: str
+    ) -> list[Account]:
+        """
+        Get accounts by type for a user.
+        
+        Args:
+            user_id: User ID
+            account_type: Account type
+            
+        Returns:
+            List of accounts
+        """
+        result = await self.session.execute(
+            select(Account)
+            .where(Account.user_id == user_id)
+            .where(Account.account_type == account_type)
+            .where(Account.is_active == True)  # noqa: E712
+        )
+        return list(result.scalars().all())
+
+    async def update_balance(
+        self, account_id: int, amount: Decimal, operation: str = "add"
+    ) -> Account | None:
+        """
+        Update account balance.
+        
+        Args:
+            account_id: Account ID
+            amount: Amount to add or subtract
+            operation: 'add' or 'subtract'
+            
+        Returns:
+            Updated account or None
+        """
+        account = await self.get_by_id(account_id)
+        
+        if account is None:
+            return None
+        
+        if operation == "add":
+            new_balance = account.balance + amount
+        elif operation == "subtract":
+            new_balance = account.balance - amount
+        else:
+            raise ValueError(f"Invalid operation: {operation}")
+        
+        if new_balance < 0:
+            raise ValueError("Account balance cannot be negative")
+        
+        return await self.update(account_id, balance=new_balance)
+
+    async def get_accounts_by_currency(
+        self, user_id: int, currency: str
+    ) -> list[Account]:
+        """
+        Get accounts by currency.
+        
+        Args:
+            user_id: User ID
+            currency: Currency code
+            
+        Returns:
+            List of accounts
+        """
+        result = await self.session.execute(
+            select(Account)
+            .where(Account.user_id == user_id)
+            .where(Account.currency == currency)
+            .where(Account.is_active == True)  # noqa: E712
+        )
+        return list(result.scalars().all())
+
+
+
+
+================================================================================
+File path: src/repositories/base.py
+================================================================================
+"""
+Base repository with common CRUD operations.
+"""
+from typing import Any, Generic, Type, TypeVar
+
+from sqlalchemy import delete, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.models.base import Base
+
+ModelType = TypeVar("ModelType", bound=Base)
+
+
+class BaseRepository(Generic[ModelType]):
+    """Base repository with CRUD operations."""
+
+    def __init__(self, model: Type[ModelType], session: AsyncSession):
+        """
+        Initialize repository.
+        
+        Args:
+            model: SQLAlchemy model class
+            session: Async database session
+        """
+        self.model = model
+        self.session = session
+
+    async def create(self, **kwargs: Any) -> ModelType:
+        """
+        Create new record.
+        
+        Args:
+            **kwargs: Model fields
+            
+        Returns:
+            Created model instance
+        """
+        instance = self.model(**kwargs)
+        self.session.add(instance)
+        await self.session.commit()
+        await self.session.refresh(instance)
+        return instance
+
+    async def get_by_id(self, id: int) -> ModelType | None:
+        """
+        Get record by ID.
+        
+        Args:
+            id: Record ID
+            
+        Returns:
+            Model instance or None
+        """
+        result = await self.session.execute(
+            select(self.model).where(self.model.id == id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_all(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        **filters: Any,
+    ) -> list[ModelType]:
+        """
+        Get all records with optional filters.
+        
+        Args:
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+            **filters: Filter conditions
+            
+        Returns:
+            List of model instances
+        """
+        query = select(self.model)
+        
+        # Apply filters
+        for key, value in filters.items():
+            if value is not None and hasattr(self.model, key):
+                query = query.where(getattr(self.model, key) == value)
+        
+        query = query.offset(skip).limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def count(self, **filters: Any) -> int:
+        """
+        Count records with optional filters.
+        
+        Args:
+            **filters: Filter conditions
+            
+        Returns:
+            Number of records
+        """
+        from sqlalchemy import func
+        
+        query = select(func.count(self.model.id))
+        
+        # Apply filters
+        for key, value in filters.items():
+            if value is not None and hasattr(self.model, key):
+                query = query.where(getattr(self.model, key) == value)
+        
+        result = await self.session.execute(query)
+        return result.scalar_one()
+
+    async def update(self, id: int, **kwargs: Any) -> ModelType | None:
+        """
+        Update record by ID.
+        
+        Args:
+            id: Record ID
+            **kwargs: Fields to update
+            
+        Returns:
+            Updated model instance or None
+        """
+        # Remove None values
+        update_data = {k: v for k, v in kwargs.items() if v is not None}
+        
+        if not update_data:
+            return await self.get_by_id(id)
+        
+        stmt = (
+            update(self.model)
+            .where(self.model.id == id)
+            .values(**update_data)
+            .returning(self.model)
+        )
+        
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        
+        return result.scalar_one_or_none()
+
+    async def delete(self, id: int) -> bool:
+        """
+        Delete record by ID.
+        
+        Args:
+            id: Record ID
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        stmt = delete(self.model).where(self.model.id == id)
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount > 0
+
+    async def exists(self, **filters: Any) -> bool:
+        """
+        Check if record exists.
+        
+        Args:
+            **filters: Filter conditions
+            
+        Returns:
+            True if exists, False otherwise
+        """
+        from sqlalchemy import exists as sa_exists
+        
+        query = select(sa_exists().where(self.model.id > 0))
+        
+        # Apply filters
+        for key, value in filters.items():
+            if value is not None and hasattr(self.model, key):
+                query = query.where(getattr(self.model, key) == value)
+        
+        result = await self.session.execute(query)
+        return result.scalar_one()
+
+
+
+
+================================================================================
+File path: src/repositories/budget_repo.py
+================================================================================
+"""
+Budget repository.
+"""
+from datetime import date
+from decimal import Decimal
+
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.models.budget import Budget
+from src.repositories.base import BaseRepository
+
+
+class BudgetRepository(BaseRepository[Budget]):
+    """Repository for Budget model."""
+
+    def __init__(self, session: AsyncSession):
+        super().__init__(Budget, session)
+
+    async def get_user_budgets(
+        self, user_id: int, active_only: bool = True
+    ) -> list[Budget]:
+        """
+        Get all budgets for user.
+        
+        Args:
+            user_id: User ID
+            active_only: Only active budgets (within date range)
+            
+        Returns:
+            List of budgets
+        """
+        query = select(Budget).where(Budget.user_id == user_id)
+        
+        if active_only:
+            today = date.today()
+            query = query.where(
+                and_(
+                    Budget.start_date <= today,
+                    or_(Budget.end_date.is_(None), Budget.end_date >= today),
+                )
+            )
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_by_category(
+        self, user_id: int, category_id: int
+    ) -> Budget | None:
+        """
+        Get budget for specific category.
+        
+        Args:
+            user_id: User ID
+            category_id: Category ID
+            
+        Returns:
+            Budget or None
+        """
+        result = await self.session.execute(
+            select(Budget)
+            .where(Budget.user_id == user_id)
+            .where(Budget.category_id == category_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_spent_amount(
+        self, budget_id: int, start_date: date, end_date: date | None = None
+    ) -> Decimal:
+        """
+        Calculate spent amount for budget period.
+        
+        Args:
+            budget_id: Budget ID
+            start_date: Period start
+            end_date: Period end
+            
+        Returns:
+            Spent amount
+        """
+        from src.models.transaction import Transaction
+        
+        budget = await self.get_by_id(budget_id)
+        if not budget:
+            return Decimal("0.00")
+        
+        query = (
+            select(func.sum(Transaction.amount))
+            .where(Transaction.transaction_type == "expense")
+            .where(Transaction.transaction_date >= start_date)
+        )
+        
+        if end_date:
+            query = query.where(Transaction.transaction_date <= end_date)
+        
+        if budget.category_id:
+            query = query.where(Transaction.category_id == budget.category_id)
+        
+        result = await self.session.execute(query)
+        total = result.scalar_one_or_none()
+        return total if total is not None else Decimal("0.00")
+
+
+
+
+================================================================================
+File path: src/repositories/__init__.py
+================================================================================
+"""
+Data access layer - Repository pattern.
+"""
+from src.repositories.account_repo import AccountRepository
+from src.repositories.budget_repo import BudgetRepository
+from src.repositories.category_repo import CategoryRepository
+from src.repositories.transaction_repo import TransactionRepository
+from src.repositories.user_repo import UserRepository
+
+__all__ = [
+    "UserRepository",
+    "AccountRepository",
+    "CategoryRepository",
+    "TransactionRepository",
+    "BudgetRepository",
+]
+
+
+
+
+================================================================================
+File path: src/core/database.py
+================================================================================
+"""
+Async SQLAlchemy database setup.
+"""
+from collections.abc import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from src.config import settings
+from src.models.base import Base  # ← Импортируем Base из models
+
+# Create async engine
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=settings.DATABASE_ECHO,
+    pool_size=settings.DATABASE_POOL_SIZE,
+    max_overflow=settings.DATABASE_MAX_OVERFLOW,
+    pool_pre_ping=True,
+)
+
+# Create session factory
+async_session_maker = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
+
+
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    """Dependency for getting async database session."""
+    async with async_session_maker() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+async def init_db() -> None:
+    """Initialize database (create all tables)."""
+    # Импортируем все модели чтобы они зарегистрировались в MetaData
+    from src.models.user import User          # [web:17]
+    from src.models.account import Account    # [web:22]
+    from src.models.category import Category  # [web:22]
+    from src.models.transaction import Transaction  # [web:22]
+    from src.models.budget import Budget      # если есть такая модель
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+async def close_db() -> None:
+    """Close database connections."""
+    await engine.dispose()
+
+
+
+
+================================================================================
+File path: src/core/security.py
+================================================================================
+"""
+Security utilities: JWT tokens, password hashing.
+"""
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from jose import jwt
+from passlib.context import CryptContext
+
+from src.config import settings
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against a hash."""
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_password_hash(password: str) -> str:
+    """Hash a password."""
+    return pwd_context.hash(password)
+
+
+def create_access_token(subject: str | Any, expires_delta: timedelta | None = None) -> str:
+    """Create JWT access token."""
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        )
+    
+    to_encode = {"exp": expire, "sub": str(subject), "type": "access"}
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def create_refresh_token(subject: str | Any) -> str:
+    """Create JWT refresh token."""
+    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    to_encode = {"exp": expire, "sub": str(subject), "type": "refresh"}
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def decode_token(token: str) -> dict[str, Any]:
+    """Decode and verify JWT token."""
+    return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+
+
+
+
+================================================================================
+File path: src/core/exceptions.py
+================================================================================
+"""
+Custom application exceptions.
+"""
+from typing import Any
+
+
+class AutoFlowException(Exception):
+    """Base exception."""
+    def __init__(self, message: str = "An error occurred", status_code: int = 500, detail: Any = None):
+        self.message = message
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(self.message)
+
+
+class AuthenticationError(AutoFlowException):
+    """Authentication failed."""
+    def __init__(self, message: str = "Authentication failed", detail: Any = None):
+        super().__init__(message=message, status_code=401, detail=detail)
+
+
+class AuthorizationError(AutoFlowException):
+    """Not authorized."""
+    def __init__(self, message: str = "Not authorized", detail: Any = None):
+        super().__init__(message=message, status_code=403, detail=detail)
+
+
+class NotFoundError(AutoFlowException):
+    """Resource not found."""
+    def __init__(self, message: str = "Resource not found", detail: Any = None):
+        super().__init__(message=message, status_code=404, detail=detail)
+
+
+class ValidationError(AutoFlowException):
+    """Validation error."""
+    def __init__(self, message: str = "Validation error", detail: Any = None):
+        super().__init__(message=message, status_code=422, detail=detail)
+
+
+class ConflictError(AutoFlowException):
+    """Resource conflict."""
+    def __init__(self, message: str = "Resource conflict", detail: Any = None):
+        super().__init__(message=message, status_code=409, detail=detail)
+
+
+
+
+================================================================================
+File path: src/core/cache.py
+================================================================================
+"""
+Redis cache wrapper.
+"""
+import json
+from typing import Any
+
+from redis.asyncio import Redis
+
+from src.config import settings
+
+
+class RedisCache:
+    """Async Redis cache wrapper."""
+
+    def __init__(self) -> None:
+        self.redis: Redis | None = None
+
+    async def connect(self) -> None:
+        """Connect to Redis."""
+        self.redis = Redis.from_url(
+            str(settings.REDIS_URL),
+            encoding="utf-8",
+            decode_responses=True,
+        )
+
+    async def disconnect(self) -> None:
+        """Close Redis connection."""
+        if self.redis:
+            await self.redis.close()
+
+    async def get(self, key: str) -> Any:
+        """Get value from cache."""
+        if not self.redis:
+            return None
+        value = await self.redis.get(key)
+        if value:
+            return json.loads(value)
+        return None
+
+    async def set(self, key: str, value: Any, ttl: int = settings.REDIS_CACHE_TTL) -> None:
+        """Set value in cache with TTL."""
+        if not self.redis:
+            return
+        await self.redis.setex(key, ttl, json.dumps(value, default=str))
+
+    async def delete(self, key: str) -> None:
+        """Delete key from cache."""
+        if not self.redis:
+            return
+        await self.redis.delete(key)
+
+
+cache = RedisCache()
+
+
+
+
+================================================================================
+File path: src/core/logging.py
+================================================================================
+"""
+Structured logging setup.
+"""
+import logging
+import sys
+
+import structlog
+
+from src.config import settings
+
+
+def setup_logging() -> None:
+    """Configure structured logging."""
+    if settings.LOG_FORMAT == "json":
+        processors = [
+            structlog.contextvars.merge_contextvars,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer(),
+        ]
+    else:
+        processors = [
+            structlog.contextvars.merge_contextvars,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S"),
+            structlog.dev.ConsoleRenderer(),
+        ]
+
+    structlog.configure(
+        processors=processors,
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=getattr(logging, settings.LOG_LEVEL),
+    )
+
+
+def get_logger(name: str) -> structlog.stdlib.BoundLogger:
+    """Get logger instance."""
+    return structlog.get_logger(name)
+
+
+
+
+================================================================================
+File path: src/core/__init__.py
+================================================================================
+
+
+
+================================================================================
+File path: src/schemas/analytics.py
+================================================================================
+"""
+Analytics Pydantic schemas.
+"""
+from datetime import date
+from decimal import Decimal
+from typing import Literal
+
+from src.schemas.base import BaseSchema
+
+
+TimeGrouping = Literal["day", "week", "month", "year"]
+
+
+class TimeSeriesPoint(BaseSchema):
+    """Точка временного ряда."""
+    
+    date: str  # ISO format or period (YYYY-MM)
+    income: Decimal = Decimal("0.00")
+    expense: Decimal = Decimal("0.00")
+    net: Decimal = Decimal("0.00")
+    balance: Decimal | None = None
+
+
+class CategoryAnalytics(BaseSchema):
+    """Аналитика по категории."""
+    
+    category_id: int
+    category_name: str
+    total_amount: Decimal
+    transaction_count: int
+    percentage: float
+    average_amount: Decimal
+    max_amount: Decimal
+    min_amount: Decimal
+
+
+class AccountAnalytics(BaseSchema):
+    """Аналитика по счёту."""
+    
+    account_id: int
+    account_name: str
+    starting_balance: Decimal
+    ending_balance: Decimal
+    total_income: Decimal
+    total_expense: Decimal
+    transaction_count: int
+
+
+class SpendingPattern(BaseSchema):
+    """Паттерн расходов."""
+    
+    pattern_type: str  # daily_average, weekly_peak, monthly_trend
+    value: Decimal
+    description: str
+
+
+class FinancialHealthScore(BaseSchema):
+    """Оценка финансового здоровья."""
+    
+    score: int  # 0-100
+    savings_rate: float  # percentage
+    expense_volatility: float
+    budget_adherence: float
+    recommendations: list[str]
+
+
+class AnalyticsReport(BaseSchema):
+    """Полный аналитический отчёт."""
+    
+    period_start: date
+    period_end: date
+    
+    time_series: list[TimeSeriesPoint]
+    
+    top_expense_categories: list[CategoryAnalytics]
+    top_income_categories: list[CategoryAnalytics]
+    
+    account_performance: list[AccountAnalytics]
+    
+    spending_patterns: list[SpendingPattern]
+    health_score: FinancialHealthScore
+
+
+
+
+================================================================================
+File path: src/schemas/dashboard.py
+================================================================================
+"""
+Dashboard Pydantic schemas.
+"""
+from datetime import date
+from decimal import Decimal
+
+from src.schemas.account import AccountResponse
+from src.schemas.base import BaseSchema
+from src.schemas.transaction import TransactionResponse
+
+
+class BalanceOverview(BaseSchema):
+    """Обзор баланса."""
+    
+    total_balance: Decimal
+    currency: str = "RUB"
+    change_amount: Decimal = Decimal("0.00")
+    change_percentage: float = 0.0
+    account_count: int = 0
+
+
+class IncomeExpenseSummary(BaseSchema):
+    """Сводка доходов/расходов."""
+    
+    total_income: Decimal = Decimal("0.00")
+    total_expense: Decimal = Decimal("0.00")
+    net_amount: Decimal = Decimal("0.00")
+    income_count: int = 0
+    expense_count: int = 0
+
+
+class CategorySummary(BaseSchema):
+    """Сводка по категории."""
+    
+    category_id: int
+    category_name: str
+    category_type: str
+    total_amount: Decimal
+    transaction_count: int
+    percentage: float = 0.0
+
+
+class MonthlyComparison(BaseSchema):
+    """Сравнение по месяцам."""
+    
+    month: str  # YYYY-MM
+    income: Decimal
+    expense: Decimal
+    net: Decimal
+
+
+class DashboardData(BaseSchema):
+    """Полные данные для дашборда."""
+    
+    period_start: date
+    period_end: date
+    
+    balance: BalanceOverview
+    income_expense: IncomeExpenseSummary
+    
+    top_accounts: list[AccountResponse]
+    recent_transactions: list[TransactionResponse]
+    
+    expense_by_category: list[CategorySummary]
+    income_by_category: list[CategorySummary]
+    
+    monthly_trend: list[MonthlyComparison]
+
+
+
+
+================================================================================
+File path: src/schemas/user.py
+================================================================================
+"""
+User Pydantic schemas.
+"""
+from pydantic import EmailStr, Field, field_validator
+
+from src.schemas.base import BaseSchema, TimestampSchema
+
+
+class UserBase(BaseSchema):
+    """Базовые поля пользователя."""
+    
+    email: EmailStr
+    username: str = Field(min_length=3, max_length=100)
+    full_name: str | None = Field(None, max_length=255)
+
+
+class UserCreate(UserBase):
+    """Схема создания пользователя."""
+    
+    password: str = Field(min_length=8, max_length=100)
+    
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        """Валидация пароля."""
+        if not any(char.isdigit() for char in v):
+            raise ValueError("Password must contain at least one digit")
+        if not any(char.isupper() for char in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(char.islower() for char in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        return v
+
+
+class UserUpdate(BaseSchema):
+    """Схема обновления пользователя."""
+    
+    email: EmailStr | None = None
+    username: str | None = Field(None, min_length=3, max_length=100)
+    full_name: str | None = Field(None, max_length=255)
+    password: str | None = Field(None, min_length=8, max_length=100)
+    is_active: bool | None = None
+
+
+class UserInDB(UserBase, TimestampSchema):
+    """Пользователь из БД."""
+    
+    id: int
+    is_active: bool
+    is_superuser: bool
+    hashed_password: str
+
+
+class UserResponse(UserBase, TimestampSchema):
+    """Пользователь для API ответа (без пароля)."""
+    
+    id: int
+    is_active: bool
+    is_superuser: bool
+
+
+class UserProfile(UserResponse):
+    """Профиль пользователя с дополнительной информацией."""
+    
+    total_accounts: int = 0
+    total_transactions: int = 0
+
+
+
+
+================================================================================
+File path: src/schemas/base.py
+================================================================================
+"""
+Base Pydantic schemas.
+"""
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
+
+
+class BaseSchema(BaseModel):
+    """Base schema with common configuration."""
+    
+    model_config = ConfigDict(
+        from_attributes=True,  # Для работы с SQLAlchemy моделями
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+    )
+
+
+class TimestampSchema(BaseSchema):
+    """Schema with timestamps."""
+    
+    created_at: datetime
+    updated_at: datetime
+
+
+class PaginationParams(BaseModel):
+    """Параметры пагинации."""
+    
+    page: int = 1
+    page_size: int = 20
+    
+    @property
+    def offset(self) -> int:
+        """Вычислить offset для SQL."""
+        return (self.page - 1) * self.page_size
+    
+    @property
+    def limit(self) -> int:
+        """Вычислить limit для SQL."""
+        return self.page_size
+
+
+class PaginatedResponse(BaseSchema):
+    """Обёртка для пагинированных ответов."""
+    
+    items: list[Any]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    
+    @classmethod
+    def create(
+        cls,
+        items: list[Any],
+        total: int,
+        page: int,
+        page_size: int,
+    ) -> "PaginatedResponse":
+        """Создать пагинированный ответ."""
+        total_pages = (total + page_size - 1) // page_size
+        return cls(
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+        )
+
+
+
+
+================================================================================
+File path: src/schemas/budget.py
+================================================================================
+"""
+Budget Pydantic schemas.
+"""
+from datetime import date
+from decimal import Decimal
+from typing import Literal
+
+from pydantic import Field, field_validator
+
+from src.schemas.base import BaseSchema, TimestampSchema
+from src.schemas.category import CategoryResponse
+
+
+PeriodType = Literal["daily", "weekly", "monthly", "yearly"]
+
+
+class BudgetBase(BaseSchema):
+    """Базовые поля бюджета."""
+    
+    name: str = Field(min_length=1, max_length=255)
+    amount: Decimal = Field(gt=0)
+    period_type: PeriodType
+    start_date: date
+    end_date: date | None = None
+    
+    @field_validator("end_date")
+    @classmethod
+    def validate_dates(cls, v: date | None, info) -> date | None:
+        """Проверка что end_date > start_date."""
+        if v is not None and "start_date" in info.data:
+            if v <= info.data["start_date"]:
+                raise ValueError("end_date must be after start_date")
+        return v
+
+
+class BudgetCreate(BudgetBase):
+    """Схема создания бюджета."""
+    
+    category_id: int | None = None
+
+
+class BudgetUpdate(BaseSchema):
+    """Схема обновления бюджета."""
+    
+    name: str | None = Field(None, min_length=1, max_length=255)
+    amount: Decimal | None = Field(None, gt=0)
+    period_type: PeriodType | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    category_id: int | None = None
+
+
+class BudgetInDB(BudgetBase, TimestampSchema):
+    """Бюджет из БД."""
+    
+    id: int
+    user_id: int
+    category_id: int | None
+
+
+class BudgetResponse(BudgetBase, TimestampSchema):
+    """Бюджет для API ответа."""
+    
+    id: int
+    category_id: int | None
+
+
+class BudgetWithStats(BudgetResponse):
+    """Бюджет со статистикой использования."""
+    
+    category: CategoryResponse | None = None
+    spent_amount: Decimal = Decimal("0.00")
+    remaining_amount: Decimal = Decimal("0.00")
+    spent_percentage: float = 0.0
+    is_exceeded: bool = False
+    days_remaining: int = 0
+
+
+
+
+================================================================================
+File path: src/schemas/category.py
+================================================================================
+"""
+Category Pydantic schemas.
+"""
+from typing import Literal
+
+from pydantic import Field
+
+from src.schemas.base import BaseSchema, TimestampSchema
+
+
+CategoryType = Literal["income", "expense", "transfer"]
+
+
+class CategoryBase(BaseSchema):
+    """Базовые поля категории."""
+    
+    name: str = Field(min_length=1, max_length=100)
+    category_type: CategoryType
+    icon: str | None = Field(None, max_length=50)
+    color: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class CategoryCreate(CategoryBase):
+    """Схема создания категории."""
+    pass
+
+
+class CategoryUpdate(BaseSchema):
+    """Схема обновления категории."""
+    
+    name: str | None = Field(None, min_length=1, max_length=100)
+    category_type: CategoryType | None = None
+    icon: str | None = Field(None, max_length=50)
+    color: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    is_active: bool | None = None
+
+
+class CategoryInDB(CategoryBase, TimestampSchema):
+    """Категория из БД."""
+    
+    id: int
+    user_id: int | None
+    is_system: bool
+    is_active: bool
+
+
+class CategoryResponse(CategoryBase, TimestampSchema):
+    """Категория для API ответа."""
+    
+    id: int
+    is_system: bool
+    is_active: bool
+
+
+class CategoryWithStats(CategoryResponse):
+    """Категория со статистикой использования."""
+    
+    transaction_count: int = 0
+    total_amount: str = "0.00"  # Decimal as string for JSON
+
+
+
+
+================================================================================
+File path: src/schemas/account.py
+================================================================================
+"""
+Account Pydantic schemas.
+"""
+from decimal import Decimal
+from typing import Literal
+
+from pydantic import Field, field_validator
+
+from src.schemas.base import BaseSchema, TimestampSchema
+
+
+AccountType = Literal["card", "bank_account", "cash", "crypto", "investment"]
+
+
+class AccountBase(BaseSchema):
+    """Базовые поля счёта."""
+    
+    name: str = Field(min_length=1, max_length=255)
+    account_type: AccountType
+    currency: str = Field(default="RUB", max_length=3)
+    bank_name: str | None = Field(None, max_length=255)
+    last_four_digits: str | None = Field(None, min_length=4, max_length=4)
+    icon: str | None = Field(None, max_length=50)
+    color: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    include_in_total: bool = True
+    
+    @field_validator("currency")
+    @classmethod
+    def validate_currency(cls, v: str) -> str:
+        """Валидация валюты."""
+        allowed = ["RUB", "USD", "EUR", "GBP", "CNY", "BTC", "ETH"]
+        if v.upper() not in allowed:
+            raise ValueError(f"Currency must be one of: {', '.join(allowed)}")
+        return v.upper()
+
+
+class AccountCreate(AccountBase):
+    """Схема создания счёта."""
+    
+    balance: Decimal = Field(default=Decimal("0.00"), ge=0)
+
+
+class AccountUpdate(BaseSchema):
+    """Схема обновления счёта."""
+    
+    name: str | None = Field(None, min_length=1, max_length=255)
+    account_type: AccountType | None = None
+    currency: str | None = Field(None, max_length=3)
+    balance: Decimal | None = Field(None, ge=0)
+    bank_name: str | None = Field(None, max_length=255)
+    last_four_digits: str | None = Field(None, min_length=4, max_length=4)
+    icon: str | None = Field(None, max_length=50)
+    color: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    is_active: bool | None = None
+    include_in_total: bool | None = None
+
+
+class AccountInDB(AccountBase, TimestampSchema):
+    """Счёт из БД."""
+    
+    id: int
+    user_id: int
+    balance: Decimal
+    is_active: bool
+
+
+class AccountResponse(AccountBase, TimestampSchema):
+    """Счёт для API ответа."""
+    
+    id: int
+    balance: Decimal
+    is_active: bool
+
+
+class AccountWithStats(AccountResponse):
+    """Счёт с дополнительной статистикой."""
+    
+    transaction_count: int = 0
+    last_transaction_date: str | None = None
+    income_total: Decimal = Decimal("0.00")
+    expense_total: Decimal = Decimal("0.00")
+
+
+
+
+================================================================================
+File path: src/schemas/transaction.py
+================================================================================
+"""
+Transaction Pydantic schemas.
+"""
+from datetime import date
+from decimal import Decimal
+from typing import Literal
+
+from pydantic import Field, field_validator
+
+from src.schemas.account import AccountResponse
+from src.schemas.base import BaseSchema, TimestampSchema
+from src.schemas.category import CategoryResponse
+
+
+TransactionType = Literal["income", "expense", "transfer"]
+
+
+class TransactionBase(BaseSchema):
+    """Базовые поля транзакции."""
+    
+    account_id: int
+    category_id: int | None = None
+    transaction_date: date
+    amount: Decimal = Field(gt=0)
+    transaction_type: TransactionType
+    description: str | None = Field(None, max_length=500)
+    notes: str | None = None
+    merchant: str | None = Field(None, max_length=255)
+    location: str | None = Field(None, max_length=255)
+    tags: str | None = Field(None, max_length=500)
+    
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, v: str | None) -> str | None:
+        """Валидация тегов (comma-separated)."""
+        if v is None:
+            return None
+        # Удаляем лишние пробелы
+        tags = [tag.strip() for tag in v.split(",")]
+        return ", ".join([tag for tag in tags if tag])
+
+
+class TransactionCreate(TransactionBase):
+    """Схема создания транзакции."""
+    
+    target_account_id: int | None = None
+    
+    @field_validator("target_account_id")
+    @classmethod
+    def validate_transfer(cls, v: int | None, info) -> int | None:
+        """Для переводов target_account_id обязателен."""
+        if info.data.get("transaction_type") == "transfer" and v is None:
+            raise ValueError("target_account_id required for transfer transactions")
+        return v
+
+
+class TransactionUpdate(BaseSchema):
+    """Схема обновления транзакции."""
+    
+    account_id: int | None = None
+    category_id: int | None = None
+    transaction_date: date | None = None
+    amount: Decimal | None = Field(None, gt=0)
+    transaction_type: TransactionType | None = None
+    description: str | None = Field(None, max_length=500)
+    notes: str | None = None
+    merchant: str | None = Field(None, max_length=255)
+    location: str | None = Field(None, max_length=255)
+    tags: str | None = Field(None, max_length=500)
+    target_account_id: int | None = None
+
+
+class TransactionInDB(TransactionBase, TimestampSchema):
+    """Транзакция из БД."""
+    
+    id: int
+    target_account_id: int | None
+
+
+class TransactionResponse(TransactionBase, TimestampSchema):
+    """Транзакция для API ответа."""
+    
+    id: int
+    target_account_id: int | None
+
+
+class TransactionDetail(TransactionResponse):
+    """Детальная транзакция с relationships."""
+    
+    account: AccountResponse
+    category: CategoryResponse | None = None
+    target_account: AccountResponse | None = None
+
+
+class TransactionFilters(BaseSchema):
+    """Фильтры для поиска транзакций."""
+    
+    account_id: int | None = None
+    category_id: int | None = None
+    transaction_type: TransactionType | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    min_amount: Decimal | None = None
+    max_amount: Decimal | None = None
+    merchant: str | None = None
+    search: str | None = None  # Поиск по description
+
+
+
+
+================================================================================
+File path: src/schemas/auth.py
+================================================================================
+"""
+Authentication Pydantic schemas.
+"""
+from pydantic import EmailStr, Field
+
+from src.schemas.base import BaseSchema
+from src.schemas.user import UserResponse
+
+
+class Token(BaseSchema):
+    """JWT токен."""
+    
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class TokenPayload(BaseSchema):
+    """Payload JWT токена."""
+    
+    sub: str  # user_id
+    exp: int
+    type: str  # access | refresh
+
+
+class LoginRequest(BaseSchema):
+    """Запрос на вход."""
+    
+    email: EmailStr
+    password: str = Field(min_length=1)
+
+
+class RegisterRequest(BaseSchema):
+    """Запрос на регистрацию."""
+    
+    email: EmailStr
+    username: str = Field(min_length=3, max_length=100)
+    password: str = Field(min_length=8, max_length=100)
+    full_name: str | None = Field(None, max_length=255)
+
+
+class AuthResponse(BaseSchema):
+    """Ответ после успешной аутентификации."""
+    
+    user: UserResponse
+    tokens: Token
+
+
+class RefreshTokenRequest(BaseSchema):
+    """Запрос на обновление токена."""
+    
+    refresh_token: str
+
+
+class PasswordChangeRequest(BaseSchema):
+    """Запрос на смену пароля."""
+    
+    old_password: str
+    new_password: str = Field(min_length=8, max_length=100)
+
+
+
+
+================================================================================
+File path: src/schemas/__init__.py
+================================================================================
+"""
+Pydantic schemas for API validation and serialization.
+"""
+from src.schemas.account import (
+    AccountCreate,
+    AccountResponse,
+    AccountUpdate,
+    AccountWithStats,
+)
+from src.schemas.analytics import AnalyticsReport, CategoryAnalytics, TimeSeriesPoint
+from src.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, Token
+from src.schemas.base import PaginatedResponse, PaginationParams
+from src.schemas.budget import BudgetCreate, BudgetResponse, BudgetUpdate, BudgetWithStats
+from src.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
+from src.schemas.dashboard import DashboardData, BalanceOverview, IncomeExpenseSummary
+from src.schemas.transaction import (
+    TransactionCreate,
+    TransactionDetail,
+    TransactionFilters,
+    TransactionResponse,
+    TransactionUpdate,
+)
+from src.schemas.user import UserCreate, UserProfile, UserResponse, UserUpdate
+
+__all__ = [
+    # Base
+    "PaginationParams",
+    "PaginatedResponse",
+    # Auth
+    "Token",
+    "LoginRequest",
+    "RegisterRequest",
+    "AuthResponse",
+    # User
+    "UserCreate",
+    "UserUpdate",
+    "UserResponse",
+    "UserProfile",
+    # Account
+    "AccountCreate",
+    "AccountUpdate",
+    "AccountResponse",
+    "AccountWithStats",
+    # Category
+    "CategoryCreate",
+    "CategoryUpdate",
+    "CategoryResponse",
+    # Transaction
+    "TransactionCreate",
+    "TransactionUpdate",
+    "TransactionResponse",
+    "TransactionDetail",
+    "TransactionFilters",
+    # Budget
+    "BudgetCreate",
+    "BudgetUpdate",
+    "BudgetResponse",
+    "BudgetWithStats",
+    # Dashboard
+    "DashboardData",
+    "BalanceOverview",
+    "IncomeExpenseSummary",
+    # Analytics
+    "AnalyticsReport",
+    "CategoryAnalytics",
+    "TimeSeriesPoint",
+]
+
+
+
+
+================================================================================
+File path: src/__init__.py
+================================================================================
+
+
+
+================================================================================
+File path: src/services/category_service.py
+================================================================================
+"""
+Category service.
+"""
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from src.repositories.category_repo import CategoryRepository
+from src.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
+
+
+class CategoryService:
+    """Service for category management."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self.category_repo = CategoryRepository(session)
+
+    async def create_category(
+        self, user_id: int, data: CategoryCreate
+    ) -> CategoryResponse:
+        """
+        Create new category.
+        
+        Args:
+            user_id: User ID
+            data: Category data
+            
+        Returns:
+            Created category
+        """
+        category = await self.category_repo.create(
+            user_id=user_id,
+            name=data.name,
+            category_type=data.category_type,
+            icon=data.icon,
+            color=data.color,
+            is_system=False,
+            is_active=True,
+        )
+        
+        return CategoryResponse.model_validate(category)
+
+    async def get_user_categories(
+        self,
+        user_id: int,
+        category_type: str | None = None,
+        include_system: bool = True,
+    ) -> list[CategoryResponse]:
+        """
+        Get categories for user.
+        
+        Args:
+            user_id: User ID
+            category_type: Filter by type
+            include_system: Include system categories
+            
+        Returns:
+            List of categories
+        """
+        categories = await self.category_repo.get_user_categories(
+            user_id=user_id,
+            category_type=category_type,
+            include_system=include_system,
+        )
+        
+        return [CategoryResponse.model_validate(cat) for cat in categories]
+
+    async def update_category(
+        self, category_id: int, user_id: int, data: CategoryUpdate
+    ) -> CategoryResponse:
+        """
+        Update category.
+        
+        Args:
+            category_id: Category ID
+            user_id: User ID (for authorization)
+            data: Update data
+            
+        Returns:
+            Updated category
+            
+        Raises:
+            NotFoundError: If category not found
+            AuthorizationError: If user doesn't own category or it's system
+        """
+        category = await self.category_repo.get_by_id(category_id)
+        
+        if not category:
+            raise NotFoundError("Category not found")
+        
+        if category.is_system:
+            raise AuthorizationError("Cannot modify system category")
+        
+        if category.user_id != user_id:
+            raise AuthorizationError("Access denied to this category")
+        
+        updated = await self.category_repo.update(
+            category_id,
+            **data.model_dump(exclude_unset=True),
+        )
+        
+        return CategoryResponse.model_validate(updated)
+
+    async def delete_category(self, category_id: int, user_id: int) -> bool:
+        """
+        Delete category.
+        
+        Args:
+            category_id: Category ID
+            user_id: User ID (for authorization)
+            
+        Returns:
+            True if deleted
+            
+        Raises:
+            NotFoundError: If category not found
+            AuthorizationError: If user doesn't own category or it's system
+        """
+        category = await self.category_repo.get_by_id(category_id)
+        
+        if not category:
+            raise NotFoundError("Category not found")
+        
+        if category.is_system:
+            raise AuthorizationError("Cannot delete system category")
+        
+        if category.user_id != user_id:
+            raise AuthorizationError("Access denied to this category")
+        
+        return await self.category_repo.delete(category_id)
+
+
+
+
+================================================================================
+File path: src/services/dashboard_service.py
+================================================================================
+"""
+Dashboard service.
+"""
+from datetime import date, timedelta
+from decimal import Decimal
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.repositories.account_repo import AccountRepository
+from src.repositories.transaction_repo import TransactionRepository
+from src.schemas.dashboard import (
+    BalanceOverview,
+    DashboardData,
+    IncomeExpenseSummary,
+)
+from src.schemas.account import AccountResponse
+from src.schemas.transaction import TransactionResponse
+
+
+class DashboardService:
+    """Service for dashboard data aggregation."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self.account_repo = AccountRepository(session)
+        self.transaction_repo = TransactionRepository(session)
+
+    async def get_dashboard_data(
+        self,
+        user_id: int,
+        period_start: date | None = None,
+        period_end: date | None = None,
+    ) -> DashboardData:
+        """
+        Get dashboard data for user.
+        
+        Args:
+            user_id: User ID
+            period_start: Start date (default: 30 days ago)
+            period_end: End date (default: today)
+            
+        Returns:
+            Dashboard data
+        """
+        # Default period: last 30 days
+        if not period_end:
+            period_end = date.today()
+        
+        if not period_start:
+            period_start = period_end - timedelta(days=30)
+        
+        # Get balance overview
+        balance = await self._get_balance_overview(user_id)
+        
+        # Get income/expense summary
+        income_expense = await self._get_income_expense_summary(
+            user_id, period_start, period_end
+        )
+        
+        # Get top accounts
+        accounts = await self.account_repo.get_user_accounts(
+            user_id, include_inactive=False, limit=5
+        )
+        top_accounts = [AccountResponse.model_validate(acc) for acc in accounts]
+        
+        # Get recent transactions
+        transactions = await self.transaction_repo.get_recent_transactions(
+            user_id, limit=10
+        )
+        recent_transactions = [
+            TransactionResponse.model_validate(tx) for tx in transactions
+        ]
+        
+        return DashboardData(
+            period_start=period_start,
+            period_end=period_end,
+            balance=balance,
+            income_expense=income_expense,
+            top_accounts=top_accounts,
+            recent_transactions=recent_transactions,
+            expense_by_category=[],  # TODO: Implement in analytics service
+            income_by_category=[],   # TODO: Implement in analytics service
+            monthly_trend=[],         # TODO: Implement in analytics service
+        )
+
+    async def _get_balance_overview(self, user_id: int) -> BalanceOverview:
+        """Get balance overview."""
+        total_balance = await self.account_repo.get_total_balance(user_id)
+        
+        accounts = await self.account_repo.get_user_accounts(
+            user_id, include_inactive=False
+        )
+        
+        return BalanceOverview(
+            total_balance=total_balance,
+            currency="RUB",
+            change_amount=Decimal("0.00"),  # TODO: Calculate from previous period
+            change_percentage=0.0,
+            account_count=len(accounts),
+        )
+
+    async def _get_income_expense_summary(
+        self, user_id: int, date_from: date, date_to: date
+    ) -> IncomeExpenseSummary:
+        """Get income/expense summary."""
+        total_income = await self.transaction_repo.get_total_by_type(
+            user_id, "income", date_from, date_to
+        )
+        
+        total_expense = await self.transaction_repo.get_total_by_type(
+            user_id, "expense", date_from, date_to
+        )
+        
+        return IncomeExpenseSummary(
+            total_income=total_income,
+            total_expense=total_expense,
+            net_amount=total_income - total_expense,
+            income_count=0,  # TODO: Add count to repository
+            expense_count=0,
+        )
+
+
+
+
+================================================================================
+File path: src/services/transaction_service.py
+================================================================================
+"""
+Transaction service.
+"""
+from datetime import date
+from decimal import Decimal
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from src.repositories.account_repo import AccountRepository
+from src.repositories.category_repo import CategoryRepository
+from src.repositories.transaction_repo import TransactionRepository
+from src.schemas.base import PaginatedResponse, PaginationParams
+from src.schemas.transaction import (
+    TransactionCreate,
+    TransactionDetail,
+    TransactionFilters,
+    TransactionResponse,
+    TransactionUpdate,
+)
+
+
+class TransactionService:
+    """Service for transaction management."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self.transaction_repo = TransactionRepository(session)
+        self.account_repo = AccountRepository(session)
+        self.category_repo = CategoryRepository(session)
+
+    async def create_transaction(
+        self, user_id: int, data: TransactionCreate
+    ) -> TransactionResponse:
+        """
+        Create new transaction with balance update.
+        
+        Args:
+            user_id: User ID
+            data: Transaction data
+            
+        Returns:
+            Created transaction
+            
+        Raises:
+            NotFoundError: If account/category not found
+            AuthorizationError: If user doesn't own account
+            ValidationError: If validation fails
+        """
+        # Verify account ownership
+        account = await self.account_repo.get_by_id(data.account_id)
+        if not account:
+            raise NotFoundError("Account not found")
+        
+        if account.user_id != user_id:
+            raise AuthorizationError("Access denied to this account")
+        
+        # Verify category if provided
+        if data.category_id:
+            category = await self.category_repo.get_by_id(data.category_id)
+            if not category:
+                raise NotFoundError("Category not found")
+        
+        # For transfers, verify target account
+        if data.transaction_type == "transfer":
+            if not data.target_account_id:
+                raise ValidationError("Target account required for transfers")
+            
+            target_account = await self.account_repo.get_by_id(data.target_account_id)
+            if not target_account:
+                raise NotFoundError("Target account not found")
+            
+            if target_account.user_id != user_id:
+                raise AuthorizationError("Access denied to target account")
+            
+            if data.account_id == data.target_account_id:
+                raise ValidationError("Cannot transfer to the same account")
+        
+        # Create transaction
+        transaction = await self.transaction_repo.create(
+            user_id=user_id,
+            account_id=data.account_id,
+            category_id=data.category_id,
+            transaction_date=data.transaction_date,
+            amount=data.amount,
+            transaction_type=data.transaction_type,
+            description=data.description,
+            notes=data.notes,
+            merchant=data.merchant,
+            location=data.location,
+            tags=data.tags,
+            target_account_id=data.target_account_id,
+        )
+        
+        # Update account balance
+        await self._update_balance_for_transaction(
+            account_id=data.account_id,
+            amount=data.amount,
+            transaction_type=data.transaction_type,
+            target_account_id=data.target_account_id,
+        )
+        
+        await self.session.commit()
+        
+        return TransactionResponse.model_validate(transaction)
+
+    async def get_transaction(
+        self, transaction_id: int, user_id: int
+    ) -> TransactionDetail:
+        """
+        Get transaction by ID with relationships.
+        
+        Args:
+            transaction_id: Transaction ID
+            user_id: User ID (for authorization)
+            
+        Returns:
+            Transaction with details
+            
+        Raises:
+            NotFoundError: If transaction not found
+            AuthorizationError: If user doesn't own transaction
+        """
+        transaction = await self.transaction_repo.get_by_id(transaction_id)
+        
+        if not transaction:
+            raise NotFoundError("Transaction not found")
+        
+        # Check ownership through account
+        account = await self.account_repo.get_by_id(transaction.account_id)
+        if account.user_id != user_id:
+            raise AuthorizationError("Access denied to this transaction")
+        
+        return TransactionDetail.model_validate(transaction)
+
+    async def get_user_transactions(
+        self,
+        user_id: int,
+        filters: TransactionFilters,
+        pagination: PaginationParams,
+    ) -> PaginatedResponse:
+        """
+        Get user transactions with filters and pagination.
+        
+        Args:
+            user_id: User ID
+            filters: Filter parameters
+            pagination: Pagination parameters
+            
+        Returns:
+            Paginated transactions
+        """
+        transactions = await self.transaction_repo.get_user_transactions(
+            user_id=user_id,
+            account_id=filters.account_id,
+            category_id=filters.category_id,
+            transaction_type=filters.transaction_type,
+            date_from=filters.date_from,
+            date_to=filters.date_to,
+            skip=pagination.offset,
+            limit=pagination.limit,
+        )
+        
+        # Count total (simplified - could be optimized)
+        total = len(transactions)  # In production, use separate count query
+        
+        items = [TransactionResponse.model_validate(tx) for tx in transactions]
+        
+        return PaginatedResponse.create(
+            items=items,
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
+
+    async def update_transaction(
+        self, transaction_id: int, user_id: int, data: TransactionUpdate
+    ) -> TransactionResponse:
+        """
+        Update transaction.
+        
+        Args:
+            transaction_id: Transaction ID
+            user_id: User ID (for authorization)
+            data: Update data
+            
+        Returns:
+            Updated transaction
+            
+        Raises:
+            NotFoundError: If transaction not found
+            AuthorizationError: If user doesn't own transaction
+        """
+        transaction = await self.transaction_repo.get_by_id(transaction_id)
+        
+        if not transaction:
+            raise NotFoundError("Transaction not found")
+        
+        account = await self.account_repo.get_by_id(transaction.account_id)
+        if account.user_id != user_id:
+            raise AuthorizationError("Access denied to this transaction")
+        
+        # Revert old balance changes
+        await self._revert_balance_for_transaction(transaction)
+        
+        # Update transaction
+        updated = await self.transaction_repo.update(
+            transaction_id,
+            **data.model_dump(exclude_unset=True),
+        )
+        
+        # Apply new balance changes
+        await self._update_balance_for_transaction(
+            account_id=updated.account_id,
+            amount=updated.amount,
+            transaction_type=updated.transaction_type,
+            target_account_id=updated.target_account_id,
+        )
+        
+        await self.session.commit()
+        
+        return TransactionResponse.model_validate(updated)
+
+    async def delete_transaction(
+        self, transaction_id: int, user_id: int
+    ) -> bool:
+        """
+        Delete transaction and revert balance.
+        
+        Args:
+            transaction_id: Transaction ID
+            user_id: User ID (for authorization)
+            
+        Returns:
+            True if deleted
+            
+        Raises:
+            NotFoundError: If transaction not found
+            AuthorizationError: If user doesn't own transaction
+        """
+        transaction = await self.transaction_repo.get_by_id(transaction_id)
+        
+        if not transaction:
+            raise NotFoundError("Transaction not found")
+        
+        account = await self.account_repo.get_by_id(transaction.account_id)
+        if account.user_id != user_id:
+            raise AuthorizationError("Access denied to this transaction")
+        
+        # Revert balance changes
+        await self._revert_balance_for_transaction(transaction)
+        
+        # Delete transaction
+        deleted = await self.transaction_repo.delete(transaction_id)
+        
+        await self.session.commit()
+        
+        return deleted
+
+    async def _update_balance_for_transaction(
+        self,
+        account_id: int,
+        amount: Decimal,
+        transaction_type: str,
+        target_account_id: int | None = None,
+    ) -> None:
+        """Update account balance based on transaction."""
+        if transaction_type == "income":
+            await self.account_repo.update_balance(account_id, amount, "add")
+        
+        elif transaction_type == "expense":
+            await self.account_repo.update_balance(account_id, amount, "subtract")
+        
+        elif transaction_type == "transfer" and target_account_id:
+            # Subtract from source
+            await self.account_repo.update_balance(account_id, amount, "subtract")
+            # Add to target
+            await self.account_repo.update_balance(target_account_id, amount, "add")
+
+    async def _revert_balance_for_transaction(self, transaction) -> None:
+        """Revert balance changes from transaction."""
+        if transaction.transaction_type == "income":
+            await self.account_repo.update_balance(
+                transaction.account_id, transaction.amount, "subtract"
+            )
+        
+        elif transaction.transaction_type == "expense":
+            await self.account_repo.update_balance(
+                transaction.account_id, transaction.amount, "add"
+            )
+        
+        elif transaction.transaction_type == "transfer" and transaction.target_account_id:
+            # Reverse: add to source
+            await self.account_repo.update_balance(
+                transaction.account_id, transaction.amount, "add"
+            )
+            # Subtract from target
+            await self.account_repo.update_balance(
+                transaction.target_account_id, transaction.amount, "subtract"
+            )
+
+
+
+
+================================================================================
+File path: src/services/auth_service.py
+================================================================================
+"""
+Authentication service.
+"""
+from datetime import datetime, timedelta, timezone
+
+from jose import JWTError, jwt
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.config import settings
+from src.core.exceptions import AuthenticationError, ConflictError, NotFoundError
+from src.core.security import (
+    create_access_token,
+    create_refresh_token,
+    get_password_hash,
+    verify_password,
+)
+from src.models.user import User
+from src.repositories.category_repo import CategoryRepository
+from src.repositories.user_repo import UserRepository
+from src.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, Token
+from src.schemas.user import UserResponse
+
+
+class AuthService:
+    """Service for authentication and authorization."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self.user_repo = UserRepository(session)
+        self.category_repo = CategoryRepository(session)
+
+    async def register(self, data: RegisterRequest) -> AuthResponse:
+        """
+        Register new user.
+        
+        Args:
+            data: Registration data
+            
+        Returns:
+            Auth response with user and tokens
+            
+        Raises:
+            ConflictError: If email or username already exists
+        """
+        # Check if email exists
+        if await self.user_repo.email_exists(data.email):
+            raise ConflictError(f"Email {data.email} already registered")
+        
+        # Check if username exists
+        if await self.user_repo.username_exists(data.username):
+            raise ConflictError(f"Username {data.username} already taken")
+        
+        # Create user
+        hashed_password = get_password_hash(data.password)
+        user = await self.user_repo.create(
+            email=data.email,
+            username=data.username,
+            full_name=data.full_name,
+            hashed_password=hashed_password,
+            is_active=True,
+            is_superuser=False,
+        )
+        
+        # Create default categories for new user
+        await self.category_repo.create_default_categories(user.id)
+        await self.session.commit()
+        
+        # Generate tokens
+        tokens = self._create_tokens(user.id)
+        
+        return AuthResponse(
+            user=UserResponse.model_validate(user),
+            tokens=tokens,
+        )
+
+    async def login(self, data: LoginRequest) -> AuthResponse:
+        """
+        Login user.
+        
+        Args:
+            data: Login credentials
+            
+        Returns:
+            Auth response with user and tokens
+            
+        Raises:
+            AuthenticationError: If credentials are invalid
+        """
+        # Get user by email
+        user = await self.user_repo.get_by_email(data.email)
+        
+        if not user:
+            raise AuthenticationError("Invalid email or password")
+        
+        # Verify password
+        if not verify_password(data.password, user.hashed_password):
+            raise AuthenticationError("Invalid email or password")
+        
+        # Check if user is active
+        if not user.is_active:
+            raise AuthenticationError("User account is disabled")
+        
+        # Generate tokens
+        tokens = self._create_tokens(user.id)
+        
+        return AuthResponse(
+            user=UserResponse.model_validate(user),
+            tokens=tokens,
+        )
+
+    async def refresh_token(self, refresh_token: str) -> Token:
+        """
+        Refresh access token.
+        
+        Args:
+            refresh_token: Refresh token
+            
+        Returns:
+            New token pair
+            
+        Raises:
+            AuthenticationError: If token is invalid
+        """
+        try:
+            payload = jwt.decode(
+                refresh_token,
+                settings.SECRET_KEY,
+                algorithms=[settings.ALGORITHM],
+            )
+            
+            user_id = payload.get("sub")
+            token_type = payload.get("type")
+            
+            if not user_id or token_type != "refresh":
+                raise AuthenticationError("Invalid refresh token")
+            
+            # Check if user exists and is active
+            user = await self.user_repo.get_by_id(int(user_id))
+            if not user or not user.is_active:
+                raise AuthenticationError("User not found or disabled")
+            
+            # Generate new tokens
+            return self._create_tokens(user.id)
+            
+        except JWTError:
+            raise AuthenticationError("Invalid refresh token")
+
+    async def get_current_user(self, token: str) -> User:
+        """
+        Get current user from access token.
+        
+        Args:
+            token: Access token
+            
+        Returns:
+            Current user
+            
+        Raises:
+            AuthenticationError: If token is invalid
+        """
+        try:
+            payload = jwt.decode(
+                token,
+                settings.SECRET_KEY,
+                algorithms=[settings.ALGORITHM],
+            )
+            
+            user_id = payload.get("sub")
+            token_type = payload.get("type")
+            
+            if not user_id or token_type != "access":
+                raise AuthenticationError("Invalid access token")
+            
+            user = await self.user_repo.get_by_id(int(user_id))
+            
+            if not user:
+                raise NotFoundError("User not found")
+            
+            if not user.is_active:
+                raise AuthenticationError("User account is disabled")
+            
+            return user
+            
+        except JWTError:
+            raise AuthenticationError("Invalid access token")
+
+    async def change_password(
+        self, user_id: int, old_password: str, new_password: str
+    ) -> bool:
+        """
+        Change user password.
+        
+        Args:
+            user_id: User ID
+            old_password: Current password
+            new_password: New password
+            
+        Returns:
+            True if successful
+            
+        Raises:
+            AuthenticationError: If old password is wrong
+            NotFoundError: If user not found
+        """
+        user = await self.user_repo.get_by_id(user_id)
+        
+        if not user:
+            raise NotFoundError("User not found")
+        
+        # Verify old password
+        if not verify_password(old_password, user.hashed_password):
+            raise AuthenticationError("Current password is incorrect")
+        
+        # Update password
+        hashed_password = get_password_hash(new_password)
+        await self.user_repo.update(user_id, hashed_password=hashed_password)
+        
+        return True
+
+    def _create_tokens(self, user_id: int) -> Token:
+        """Create access and refresh tokens."""
+        access_token = create_access_token(str(user_id))
+        refresh_token = create_refresh_token(str(user_id))
+        
+        return Token(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+        )
+
+
+
+
+================================================================================
+File path: src/services/account_service.py
+================================================================================
+"""
+Account service.
+"""
+from decimal import Decimal
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from src.repositories.account_repo import AccountRepository
+from src.schemas.account import AccountCreate, AccountResponse, AccountUpdate, AccountWithStats
+
+
+class AccountService:
+    """Service for account management."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self.account_repo = AccountRepository(session)
+
+    async def create_account(
+        self, user_id: int, data: AccountCreate
+    ) -> AccountResponse:
+        """
+        Create new account.
+        
+        Args:
+            user_id: Owner user ID
+            data: Account data
+            
+        Returns:
+            Created account
+        """
+        account = await self.account_repo.create(
+            user_id=user_id,
+            name=data.name,
+            account_type=data.account_type,
+            currency=data.currency,
+            balance=data.balance,
+            bank_name=data.bank_name,
+            last_four_digits=data.last_four_digits,
+            icon=data.icon,
+            color=data.color,
+            include_in_total=data.include_in_total,
+            is_active=True,
+        )
+        
+        return AccountResponse.model_validate(account)
+
+    async def get_account(self, account_id: int, user_id: int) -> AccountResponse:
+        """
+        Get account by ID.
+        
+        Args:
+            account_id: Account ID
+            user_id: User ID (for authorization)
+            
+        Returns:
+            Account
+            
+        Raises:
+            NotFoundError: If account not found
+            AuthorizationError: If user doesn't own account
+        """
+        account = await self.account_repo.get_by_id(account_id)
+        
+        if not account:
+            raise NotFoundError("Account not found")
+        
+        if account.user_id != user_id:
+            raise AuthorizationError("Access denied to this account")
+        
+        return AccountResponse.model_validate(account)
+
+    async def get_user_accounts(
+        self, user_id: int, include_inactive: bool = False
+    ) -> list[AccountResponse]:
+        """
+        Get all accounts for user.
+        
+        Args:
+            user_id: User ID
+            include_inactive: Include inactive accounts
+            
+        Returns:
+            List of accounts
+        """
+        accounts = await self.account_repo.get_user_accounts(
+            user_id=user_id,
+            include_inactive=include_inactive,
+        )
+        
+        return [AccountResponse.model_validate(acc) for acc in accounts]
+
+    async def update_account(
+        self, account_id: int, user_id: int, data: AccountUpdate
+    ) -> AccountResponse:
+        """
+        Update account.
+        
+        Args:
+            account_id: Account ID
+            user_id: User ID (for authorization)
+            data: Update data
+            
+        Returns:
+            Updated account
+            
+        Raises:
+            NotFoundError: If account not found
+            AuthorizationError: If user doesn't own account
+        """
+        account = await self.account_repo.get_by_id(account_id)
+        
+        if not account:
+            raise NotFoundError("Account not found")
+        
+        if account.user_id != user_id:
+            raise AuthorizationError("Access denied to this account")
+        
+        updated = await self.account_repo.update(
+            account_id,
+            **data.model_dump(exclude_unset=True),
+        )
+        
+        return AccountResponse.model_validate(updated)
+
+    async def delete_account(self, account_id: int, user_id: int) -> bool:
+        """
+        Delete account.
+        
+        Args:
+            account_id: Account ID
+            user_id: User ID (for authorization)
+            
+        Returns:
+            True if deleted
+            
+        Raises:
+            NotFoundError: If account not found
+            AuthorizationError: If user doesn't own account
+        """
+        account = await self.account_repo.get_by_id(account_id)
+        
+        if not account:
+            raise NotFoundError("Account not found")
+        
+        if account.user_id != user_id:
+            raise AuthorizationError("Access denied to this account")
+        
+        return await self.account_repo.delete(account_id)
+
+    async def get_total_balance(
+        self, user_id: int, currency: str = "RUB"
+    ) -> Decimal:
+        """
+        Get total balance for user.
+        
+        Args:
+            user_id: User ID
+            currency: Currency filter
+            
+        Returns:
+            Total balance
+        """
+        return await self.account_repo.get_total_balance(user_id, currency)
+
+    async def get_accounts_by_type(
+        self, user_id: int, account_type: str
+    ) -> list[AccountResponse]:
+        """
+        Get accounts by type.
+        
+        Args:
+            user_id: User ID
+            account_type: Account type
+            
+        Returns:
+            List of accounts
+        """
+        accounts = await self.account_repo.get_by_type(user_id, account_type)
+        return [AccountResponse.model_validate(acc) for acc in accounts]
+
+
+
+
+================================================================================
+File path: src/services/__init__.py
+================================================================================
+"""
+Business logic layer - Services.
+"""
+from src.services.account_service import AccountService
+from src.services.auth_service import AuthService
+from src.services.category_service import CategoryService
+from src.services.dashboard_service import DashboardService
+from src.services.transaction_service import TransactionService
+
+__all__ = [
+    "AuthService",
+    "AccountService",
+    "CategoryService",
+    "TransactionService",
+    "DashboardService",
+]
+
+
+
+

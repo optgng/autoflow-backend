@@ -1,0 +1,793 @@
+================================================================================
+File path: tests/api_tests.http
+================================================================================
+### Variables
+@baseUrl = http://localhost:8000/api/v1
+@accessToken = 
+@refreshToken = 
+
+### Health Check
+GET http://localhost:8000/health
+
+### ============================================
+### AUTH ENDPOINTS
+### ============================================
+
+### Register new user
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "username": "testuser",
+  "password": "TestPassword123",
+  "full_name": "Test User"
+}
+
+### Login
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "TestPassword123"
+}
+
+### Extract token from login response (for VS Code REST Client)
+@accessToken = {{login.response.body.tokens.access_token}}
+@refreshToken = {{login.response.body.tokens.refresh_token}}
+
+### Get current user info
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+
+### Refresh token
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refreshToken}}"
+}
+
+### Change password
+POST {{baseUrl}}/auth/change-password
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "old_password": "TestPassword123",
+  "new_password": "NewPassword123"
+}
+
+### ============================================
+### ACCOUNT ENDPOINTS
+### ============================================
+
+### Create account
+# @name createAccount
+POST {{baseUrl}}/accounts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Основная карта",
+  "account_type": "card",
+  "currency": "RUB",
+  "balance": "50000.00",
+  "bank_name": "Сбербанк",
+  "last_four_digits": "1234",
+  "icon": "💳",
+  "color": "#FF5733",
+  "include_in_total": true
+}
+
+@accountId = {{createAccount.response.body.id}}
+
+### Get all accounts
+GET {{baseUrl}}/accounts
+Authorization: Bearer {{accessToken}}
+
+### Get account by ID
+GET {{baseUrl}}/accounts/{{accountId}}
+Authorization: Bearer {{accessToken}}
+
+### Get total balance
+GET {{baseUrl}}/accounts/total-balance?currency=RUB
+Authorization: Bearer {{accessToken}}
+
+### Get accounts by type
+GET {{baseUrl}}/accounts/by-type/card
+Authorization: Bearer {{accessToken}}
+
+### Update account
+PATCH {{baseUrl}}/accounts/{{accountId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Основная карта (обновлено)",
+  "balance": "55000.00"
+}
+
+### Create second account for transfers
+# @name createAccount2
+POST {{baseUrl}}/accounts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Накопительный счёт",
+  "account_type": "bank_account",
+  "currency": "RUB",
+  "balance": "100000.00",
+  "bank_name": "Тинькофф",
+  "icon": "🏦",
+  "color": "#FFC300",
+  "include_in_total": true
+}
+
+@accountId2 = {{createAccount2.response.body.id}}
+
+### ============================================
+### CATEGORY ENDPOINTS
+### ============================================
+
+### Get all categories (includes default ones created at registration)
+GET {{baseUrl}}/categories
+Authorization: Bearer {{accessToken}}
+
+### Get expense categories only
+GET {{baseUrl}}/categories?category_type=expense
+Authorization: Bearer {{accessToken}}
+
+### Get income categories only
+GET {{baseUrl}}/categories?category_type=income
+Authorization: Bearer {{accessToken}}
+
+### Create custom category
+# @name createCategory
+POST {{baseUrl}}/categories
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Кафе и рестораны",
+  "category_type": "expense",
+  "icon": "🍽️",
+  "color": "#E74C3C"
+}
+
+@categoryId = {{createCategory.response.body.id}}
+
+### Update category
+PATCH {{baseUrl}}/categories/{{categoryId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Рестораны и бары",
+  "icon": "🍷"
+}
+
+### ============================================
+### TRANSACTION ENDPOINTS
+### ============================================
+
+### Create expense transaction
+# @name createTransaction
+POST {{baseUrl}}/transactions
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "account_id": {{accountId}},
+  "category_id": 1,
+  "transaction_date": "2026-03-10",
+  "amount": "1500.50",
+  "transaction_type": "expense",
+  "description": "Продукты в Пятёрочке",
+  "merchant": "Пятёрочка",
+  "location": "Москва",
+  "tags": "продукты, еда"
+}
+
+@transactionId = {{createTransaction.response.body.id}}
+
+### Create income transaction
+POST {{baseUrl}}/transactions
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "account_id": {{accountId}},
+  "category_id": 9,
+  "transaction_date": "2026-03-01",
+  "amount": "80000.00",
+  "transaction_type": "income",
+  "description": "Зарплата за февраль",
+  "merchant": "ООО Работодатель"
+}
+
+### Create transfer transaction
+POST {{baseUrl}}/transactions
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "account_id": {{accountId}},
+  "target_account_id": {{accountId2}},
+  "transaction_date": "2026-03-10",
+  "amount": "10000.00",
+  "transaction_type": "transfer",
+  "description": "Перевод на накопительный счёт"
+}
+
+### Get all transactions
+GET {{baseUrl}}/transactions?page=1&page_size=20
+Authorization: Bearer {{accessToken}}
+
+### Get transactions with filters
+GET {{baseUrl}}/transactions?account_id={{accountId}}&transaction_type=expense&date_from=2026-03-01&date_to=2026-03-31
+Authorization: Bearer {{accessToken}}
+
+### Get transaction by ID
+GET {{baseUrl}}/transactions/{{transactionId}}
+Authorization: Bearer {{accessToken}}
+
+### Update transaction
+PATCH {{baseUrl}}/transactions/{{transactionId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "amount": "1600.00",
+  "description": "Продукты в Пятёрочке (обновлено)"
+}
+
+### Search transactions
+GET {{baseUrl}}/transactions?search=Пятёрочка
+Authorization: Bearer {{accessToken}}
+
+### ============================================
+### DASHBOARD ENDPOINT
+### ============================================
+
+### Get dashboard data (last 30 days by default)
+GET {{baseUrl}}/dashboard
+Authorization: Bearer {{accessToken}}
+
+### Get dashboard for specific period
+GET {{baseUrl}}/dashboard?period_start=2026-03-01&period_end=2026-03-31
+Authorization: Bearer {{accessToken}}
+
+### ============================================
+### DELETE OPERATIONS (CLEANUP)
+### ============================================
+
+### Delete transaction
+DELETE {{baseUrl}}/transactions/{{transactionId}}
+Authorization: Bearer {{accessToken}}
+
+### Delete category
+DELETE {{baseUrl}}/categories/{{categoryId}}
+Authorization: Bearer {{accessToken}}
+
+### Delete account
+DELETE {{baseUrl}}/accounts/{{accountId}}
+Authorization: Bearer {{accessToken}}
+
+
+
+
+================================================================================
+File path: tests/test_accounts.py
+================================================================================
+"""
+Tests for account endpoints.
+"""
+import pytest
+from httpx import AsyncClient
+
+
+@pytest.mark.asyncio
+async def test_create_account(authenticated_client):
+    """Test creating account."""
+    client, user = authenticated_client
+    
+    response = await client.post(
+        "/api/v1/accounts",
+        json={
+            "name": "Test Account",
+            "account_type": "card",
+            "currency": "RUB",
+            "balance": "10000.00",
+        },
+    )
+    
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "Test Account"
+    assert data["balance"] == "10000.00"
+    assert data["currency"] == "RUB"
+
+
+@pytest.mark.asyncio
+async def test_get_accounts(authenticated_client):
+    """Test getting all accounts."""
+    client, user = authenticated_client
+    
+    # Create account
+    await client.post(
+        "/api/v1/accounts",
+        json={
+            "name": "Account 1",
+            "account_type": "card",
+            "currency": "RUB",
+            "balance": "5000.00",
+        },
+    )
+    
+    # Get accounts
+    response = await client.get("/api/v1/accounts")
+    
+    assert response.status_code == 200
+    accounts = response.json()
+    assert len(accounts) >= 1
+    assert accounts[0]["name"] == "Account 1"
+
+
+@pytest.mark.asyncio
+async def test_get_total_balance(authenticated_client):
+    """Test getting total balance."""
+    client, user = authenticated_client
+    
+    # Create two accounts
+    await client.post(
+        "/api/v1/accounts",
+        json={
+            "name": "Account 1",
+            "account_type": "card",
+            "currency": "RUB",
+            "balance": "10000.00",
+        },
+    )
+    
+    await client.post(
+        "/api/v1/accounts",
+        json={
+            "name": "Account 2",
+            "account_type": "card",
+            "currency": "RUB",
+            "balance": "5000.00",
+        },
+    )
+    
+    # Get total balance
+    response = await client.get("/api/v1/accounts/total-balance?currency=RUB")
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert float(data["total_balance"]) == 15000.00
+
+
+@pytest.mark.asyncio
+async def test_update_account(authenticated_client):
+    """Test updating account."""
+    client, user = authenticated_client
+    
+    # Create account
+    create_response = await client.post(
+        "/api/v1/accounts",
+        json={
+            "name": "Old Name",
+            "account_type": "card",
+            "currency": "RUB",
+            "balance": "1000.00",
+        },
+    )
+    account_id = create_response.json()["id"]
+    
+    # Update account
+    response = await client.patch(
+        f"/api/v1/accounts/{account_id}",
+        json={"name": "New Name"},
+    )
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "New Name"
+
+
+@pytest.mark.asyncio
+async def test_delete_account(authenticated_client):
+    """Test deleting account."""
+    client, user = authenticated_client
+    
+    # Create account
+    create_response = await client.post(
+        "/api/v1/accounts",
+        json={
+            "name": "To Delete",
+            "account_type": "card",
+            "currency": "RUB",
+            "balance": "1000.00",
+        },
+    )
+    account_id = create_response.json()["id"]
+    
+    # Delete account
+    response = await client.delete(f"/api/v1/accounts/{account_id}")
+    assert response.status_code == 204
+    
+    # Verify deleted
+    get_response = await client.get(f"/api/v1/accounts/{account_id}")
+    assert get_response.status_code == 404
+
+
+
+
+================================================================================
+File path: tests/test_auth.py
+================================================================================
+"""
+Tests for authentication endpoints.
+"""
+import pytest
+from httpx import AsyncClient
+
+
+@pytest.mark.asyncio
+async def test_register_success(client: AsyncClient):
+    """Test successful user registration."""
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "newuser@example.com",
+            "username": "newuser",
+            "password": "Password123",
+            "full_name": "New User",
+        },
+    )
+    
+    assert response.status_code == 201
+    data = response.json()
+    
+    assert "user" in data
+    assert "tokens" in data
+    assert data["user"]["email"] == "newuser@example.com"
+    assert data["user"]["username"] == "newuser"
+    assert "hashed_password" not in data["user"]
+    assert data["tokens"]["access_token"]
+    assert data["tokens"]["refresh_token"]
+
+
+@pytest.mark.asyncio
+async def test_register_duplicate_email(client: AsyncClient):
+    """Test registration with duplicate email."""
+    user_data = {
+        "email": "duplicate@example.com",
+        "username": "user1",
+        "password": "Password123",
+    }
+    
+    # First registration
+    response1 = await client.post("/api/v1/auth/register", json=user_data)
+    assert response1.status_code == 201
+    
+    # Second registration with same email
+    user_data["username"] = "user2"
+    response2 = await client.post("/api/v1/auth/register", json=user_data)
+    assert response2.status_code == 409
+    assert "already registered" in response2.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_register_weak_password(client: AsyncClient):
+    """Test registration with weak password."""
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "test@example.com",
+            "username": "testuser",
+            "password": "weak",  # Too short
+        },
+    )
+    
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_login_success(authenticated_client):
+    """Test successful login."""
+    client, user = authenticated_client
+    
+    # Login with same credentials
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "test@example.com",
+            "password": "TestPassword123",
+        },
+    )
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["user"]["email"] == "test@example.com"
+    assert data["tokens"]["access_token"]
+
+
+@pytest.mark.asyncio
+async def test_login_wrong_password(authenticated_client):
+    """Test login with wrong password."""
+    client, _ = authenticated_client
+    
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "test@example.com",
+            "password": "WrongPassword123",
+        },
+    )
+    
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_current_user(authenticated_client):
+    """Test getting current user info."""
+    client, user = authenticated_client
+    
+    response = await client.get("/api/v1/auth/me")
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email"] == user["email"]
+    assert data["username"] == user["username"]
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_unauthorized(client: AsyncClient):
+    """Test getting current user without token."""
+    response = await client.get("/api/v1/auth/me")
+    assert response.status_code == 401
+
+
+
+
+================================================================================
+File path: tests/test_transactions.py
+================================================================================
+"""
+Tests for transaction endpoints.
+"""
+import pytest
+from httpx import AsyncClient
+
+
+@pytest.mark.asyncio
+async def test_create_expense_transaction(authenticated_client):
+    """Test creating expense transaction."""
+    client, user = authenticated_client
+    
+    # Create account
+    account_response = await client.post(
+        "/api/v1/accounts",
+        json={
+            "name": "Test Account",
+            "account_type": "card",
+            "currency": "RUB",
+            "balance": "10000.00",
+        },
+    )
+    account_id = account_response.json()["id"]
+    
+    # Get category
+    categories_response = await client.get("/api/v1/categories?category_type=expense")
+    category_id = categories_response.json()[0]["id"]
+    
+    # Create transaction
+    response = await client.post(
+        "/api/v1/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": category_id,
+            "transaction_date": "2026-03-10",
+            "amount": "1500.00",
+            "transaction_type": "expense",
+            "description": "Test expense",
+        },
+    )
+    
+    assert response.status_code == 201
+    data = response.json()
+    assert data["amount"] == "1500.00"
+    assert data["transaction_type"] == "expense"
+    
+    # Verify balance updated
+    account_check = await client.get(f"/api/v1/accounts/{account_id}")
+    assert float(account_check.json()["balance"]) == 8500.00
+
+
+@pytest.mark.asyncio
+async def test_create_income_transaction(authenticated_client):
+    """Test creating income transaction."""
+    client, user = authenticated_client
+    
+    # Create account
+    account_response = await client.post(
+        "/api/v1/accounts",
+        json={
+            "name": "Test Account",
+            "account_type": "card",
+            "currency": "RUB",
+            "balance": "10000.00",
+        },
+    )
+    account_id = account_response.json()["id"]
+    
+    # Get income category
+    categories_response = await client.get("/api/v1/categories?category_type=income")
+    category_id = categories_response.json()[0]["id"]
+    
+    # Create transaction
+    response = await client.post(
+        "/api/v1/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": category_id,
+            "transaction_date": "2026-03-10",
+            "amount": "50000.00",
+            "transaction_type": "income",
+            "description": "Salary",
+        },
+    )
+    
+    assert response.status_code == 201
+    
+    # Verify balance updated
+    account_check = await client.get(f"/api/v1/accounts/{account_id}")
+    assert float(account_check.json()["balance"]) == 60000.00
+
+
+@pytest.mark.asyncio
+async def test_get_transactions_with_filters(authenticated_client):
+    """Test getting transactions with filters."""
+    client, user = authenticated_client
+    
+    # Create account and transactions
+    account_response = await client.post(
+        "/api/v1/accounts",
+        json={
+            "name": "Test Account",
+            "account_type": "card",
+            "currency": "RUB",
+            "balance": "10000.00",
+        },
+    )
+    account_id = account_response.json()["id"]
+    
+    category_response = await client.get("/api/v1/categories?category_type=expense")
+    category_id = category_response.json()[0]["id"]
+    
+    # Create transaction
+    await client.post(
+        "/api/v1/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": category_id,
+            "transaction_date": "2026-03-10",
+            "amount": "1000.00",
+            "transaction_type": "expense",
+            "description": "Test",
+        },
+    )
+    
+    # Get with filters
+    response = await client.get(
+        f"/api/v1/transactions?account_id={account_id}&transaction_type=expense"
+    )
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] >= 1
+
+
+
+
+================================================================================
+File path: tests/conftest.py
+================================================================================
+"""
+Pytest configuration and fixtures.
+"""
+import asyncio
+from typing import AsyncGenerator, Generator
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+
+from src.config import settings
+from src.core.database import get_async_session
+from src.models.base import Base
+from src.app import app
+
+# Test database URL (используем отдельную БД для тестов)
+TEST_DATABASE_URL = settings.DATABASE_URL
+
+# Create test engine
+test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+TestSessionLocal = sessionmaker(
+    test_engine, class_=AsyncSession, expire_on_commit=False
+)
+
+
+@pytest.fixture(scope="session")
+def event_loop() -> Generator:
+    """Create event loop for tests."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture(scope="function")
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Create test database session."""
+    # Create tables
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
+    # Create session
+    async with TestSessionLocal() as session:
+        yield session
+    
+    # Drop tables after test
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.fixture
+async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """Create test HTTP client."""
+    
+    async def override_get_db():
+        yield db_session
+    
+    app.dependency_overrides[get_async_session] = override_get_db
+    
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        yield ac
+    
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def authenticated_client(
+    client: AsyncClient,
+) -> AsyncGenerator[tuple[AsyncClient, dict], None]:
+    """Create authenticated test client."""
+    # Register user
+    register_data = {
+        "email": "test@example.com",
+        "username": "testuser",
+        "password": "TestPassword123",
+        "full_name": "Test User",
+    }
+    
+    response = await client.post("/api/v1/auth/register", json=register_data)
+    assert response.status_code == 201
+    
+    data = response.json()
+    access_token = data["tokens"]["access_token"]
+    user = data["user"]
+    
+    # Add authorization header
+    client.headers["Authorization"] = f"Bearer {access_token}"
+    
+    yield client, user
+
+
+
+
