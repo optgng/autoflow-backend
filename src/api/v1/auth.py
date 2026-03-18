@@ -47,18 +47,16 @@ async def login(
 ) -> AuthResponse:
     """
     Login user.
-    
-    Returns user data and authentication tokens.
+    Accepts email or username + password.
     """
     try:
-        auth_service = AuthService(session)
-        return await auth_service.login(data)
+        service = AuthService(session)          # ← экземпляр, не класс
+        return await service.login(data)        # ← передаём весь объект
     except AuthenticationError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
         )
-
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(

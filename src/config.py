@@ -105,8 +105,7 @@ class Settings(BaseSettings):
 
     # Telegram
     TELEGRAM_BOT_TOKEN: str | None = None
-    TELEGRAM_WEBHOOK_URL: str | None = None
-
+    TELEGRAM_BOT_USERNAME: str
 
 @lru_cache
 def get_settings() -> Settings:

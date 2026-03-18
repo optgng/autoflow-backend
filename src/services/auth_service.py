@@ -75,39 +75,28 @@ class AuthService:
 
     async def login(self, data: LoginRequest) -> AuthResponse:
         """
-        Login user.
-        
-        Args:
-            data: Login credentials
-            
-        Returns:
-            Auth response with user and tokens
-            
-        Raises:
-            AuthenticationError: If credentials are invalid
+        Login user by email or username.
         """
-        # Get user by email
-        user = await self.user_repo.get_by_email(data.email)
-        
-        if not user:
-            raise AuthenticationError("Invalid email or password")
-        
-        # Verify password
-        if not verify_password(data.password, user.hashed_password):
-            raise AuthenticationError("Invalid email or password")
-        
-        # Check if user is active
+        # Определяем тип по наличию @ — валидатор уже проверил формат
+        if "@" in data.login:
+            user = await self.user_repo.get_by_email(data.login)
+        else:
+            user = await self.user_repo.get_by_username(data.login)
+
+        # Единое сообщение — не раскрываем что именно не так
+        if not user or not verify_password(data.password, user.hashed_password):
+            raise AuthenticationError("Invalid email/username or password")
+
         if not user.is_active:
             raise AuthenticationError("User account is disabled")
-        
-        # Generate tokens
+
         tokens = self._create_tokens(user.id)
-        
+
         return AuthResponse(
             user=UserResponse.model_validate(user),
             tokens=tokens,
         )
-
+    
     async def refresh_token(self, refresh_token: str) -> Token:
         """
         Refresh access token.

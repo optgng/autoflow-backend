@@ -3,7 +3,7 @@ Account repository.
 """
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.account import Account
@@ -140,3 +140,44 @@ class AccountRepository(BaseRepository[Account]):
         )
         return list(result.scalars().all())
 
+    async def get_by_account_number(
+        self, user_id: int, account_number: str
+    ) -> Account | None:
+        """Поиск счёта по полному номеру."""
+        result = await self.session.execute(
+            select(Account).where(
+                Account.user_id        == user_id,
+                Account.account_number == account_number,
+            )
+        )
+        return result.scalar_one_or_none()
+
+
+    async def get_by_last_four(
+        self, user_id: int, last4: str
+    ) -> Account | None:
+        """Поиск карты/счёта по последним 4 цифрам (только card/bank_account)."""
+        result = await self.session.execute(
+            select(Account).where(
+                Account.user_id.in_([user_id]),
+                Account.last_four_digits == last4,
+                Account.account_type.in_(["card", "bank_account"]),
+                Account.is_active == True,
+            )
+        )
+        return result.scalar_one_or_none()
+
+
+    async def update_account_number(
+        self, account_id: int, account_number: str
+    ) -> None:
+        """Обновить полный номер счёта — вызывается из ImportService."""
+        await self.session.execute(
+            text("""
+                UPDATE finances.accounts
+                SET account_number = :account_number,
+                    updated_at     = NOW()
+                WHERE id = :id
+            """),
+            {"account_number": account_number, "id": account_id},
+        )

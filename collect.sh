@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Имя итогового файла
-OUTPUT_FILE="project_tests.txt"
+OUTPUT_FILE="project_files_back.txt"
 
 # Директории для сканирования (по умолчанию src и tests)
-TARGET_DIRS=${@:-src tests}
+TARGET_DIRS=${@:-src}
 
 # Очищаем итоговый файл, если он уже существует
 > "$OUTPUT_FILE"

@@ -46,7 +46,18 @@ class Transaction(Base):
     target_account_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("finances.accounts.id", ondelete="SET NULL"), nullable=True
     )
+    external_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        unique=True,   # дедупликация по auth_code
+        index=True,
+    )
 
+    import_source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default="manual",  # 'manual' | 'sber_pdf'
+    )
     # Transaction data
     transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
     amount: Mapped[Decimal] = mapped_column(

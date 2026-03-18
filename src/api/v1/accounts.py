@@ -21,11 +21,13 @@ async def create_account(
 ) -> AccountResponse:
     """
     Create new account.
-    
-    Requires authentication.
+    Только наличные (cash). Валидация типа — в схеме AccountCreate.
     """
-    service = AccountService(session)
-    return await service.create_account(current_user.id, data)
+    try:
+        service = AccountService(session)
+        return await service.create_account(current_user.id, data)
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("", response_model=list[AccountResponse])
@@ -34,11 +36,7 @@ async def get_accounts(
     session: DBSession,
     include_inactive: bool = False,
 ) -> list[AccountResponse]:
-    """
-    Get all accounts for current user.
-    
-    Requires authentication.
-    """
+    """Get all accounts for current user."""
     service = AccountService(session)
     return await service.get_user_accounts(current_user.id, include_inactive)
 
@@ -48,18 +46,14 @@ async def get_total_balance(
     current_user: CurrentUser,
     session: DBSession,
     currency: str = "RUB",
-    ): 
-    """
-    Get total balance for current user.
-    
-    Requires authentication.
-    """
+):
+    """Get total balance for current user."""
     service = AccountService(session)
     total = await service.get_total_balance(current_user.id, currency)
 
     if total is None:
         total = Decimal("0.00")
-        
+
     return {"total_balance": total, "currency": currency}
 
 
@@ -69,11 +63,7 @@ async def get_accounts_by_type(
     current_user: CurrentUser,
     session: DBSession,
 ) -> list[AccountResponse]:
-    """
-    Get accounts by type.
-    
-    Requires authentication.
-    """
+    """Get accounts by type."""
     service = AccountService(session)
     return await service.get_accounts_by_type(current_user.id, account_type)
 
@@ -84,11 +74,7 @@ async def get_account(
     current_user: CurrentUser,
     session: DBSession,
 ) -> AccountResponse:
-    """
-    Get account by ID.
-    
-    Requires authentication and ownership.
-    """
+    """Get account by ID."""
     try:
         service = AccountService(session)
         return await service.get_account(account_id, current_user.id)
@@ -105,18 +91,16 @@ async def update_account(
     current_user: CurrentUser,
     session: DBSession,
 ) -> AccountResponse:
-    """
-    Update account.
-    
-    Requires authentication and ownership.
-    """
+    """Update account."""
     try:
         service = AccountService(session)
         return await service.update_account(account_id, current_user.id, data)
     except NotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,   detail=str(e))
     except AuthorizationError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,   detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -125,11 +109,7 @@ async def delete_account(
     current_user: CurrentUser,
     session: DBSession,
 ) -> None:
-    """
-    Delete account.
-    
-    Requires authentication and ownership.
-    """
+    """Delete account (soft delete for card/bank_account, hard for cash)."""
     try:
         service = AccountService(session)
         await service.delete_account(account_id, current_user.id)

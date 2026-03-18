@@ -1,11 +1,23 @@
 """
 Authentication Pydantic schemas.
 """
-from pydantic import EmailStr, Field
-
+import re
+from typing import Optional
+from pydantic import BaseModel, field_validator, EmailStr, Field
 from src.schemas.base import BaseSchema
 from src.schemas.user import UserResponse
 
+EMAIL_REGEX = re.compile(
+    r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$'
+)
+USERNAME_REGEX = re.compile(r'^[a-zA-Z0-9_\-]{3,100}$')
+
+def is_valid_email(value: str) -> bool:
+    return bool(EMAIL_REGEX.match(value))
+
+
+def is_valid_username(value: str) -> bool:
+    return bool(USERNAME_REGEX.match(value))
 
 class Token(BaseSchema):
     """JWT токен."""
@@ -22,21 +34,67 @@ class TokenPayload(BaseSchema):
     exp: int
     type: str  # access | refresh
 
+class LoginRequest(BaseModel):
+    login:    str   # email или username — валидируется ниже
+    password: str
 
-class LoginRequest(BaseSchema):
-    """Запрос на вход."""
-    
-    email: EmailStr
-    password: str = Field(min_length=1)
+    @field_validator('login')
+    @classmethod
+    def validate_login(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v:
+            raise ValueError("Поле не может быть пустым")
+        if '@' in v:
+            if not EMAIL_REGEX.match(v):
+                raise ValueError("Некорректный email. Ожидается формат: user@domain.com")
+        else:
+            if not USERNAME_REGEX.match(v):
+                raise ValueError(
+                    "Некорректный username. "
+                    "Допускаются буквы, цифры, _ и -. "
+                    "Длина от 3 до 100 символов"
+                )
+        return v
 
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Пароль не может быть пустым")
+        return v
 
-class RegisterRequest(BaseSchema):
-    """Запрос на регистрацию."""
-    
-    email: EmailStr
-    username: str = Field(min_length=3, max_length=100)
-    password: str = Field(min_length=8, max_length=100)
-    full_name: str | None = Field(None, max_length=255)
+class RegisterRequest(BaseModel):
+    email:     EmailStr  # Pydantic встроенный валидатор
+    username:  str
+    password:  str
+    full_name: Optional[str] = None
+
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        v = v.strip()
+        if not is_valid_username(v):
+            raise ValueError(
+                "Username может содержать только буквы, цифры, _ и -. "
+                "Длина от 3 до 100 символов"
+            )
+        return v
+
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        errors = []
+        if len(v) < 8:
+            errors.append("минимум 8 символов")
+        if not re.search(r'[A-Z]', v):
+            errors.append("минимум одна заглавная буква")
+        if not re.search(r'[a-z]', v):
+            errors.append("минимум одна строчная буква")
+        if not re.search(r'\d', v):
+            errors.append("минимум одна цифра")
+        if errors:
+            raise ValueError(f"Пароль должен содержать: {', '.join(errors)}")
+        return v
 
 
 class AuthResponse(BaseSchema):

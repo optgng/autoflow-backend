@@ -2,6 +2,7 @@
 FastAPI application factory.
 """
 from contextlib import asynccontextmanager
+import asyncio
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request, status
@@ -14,6 +15,7 @@ from src.core.cache import cache
 from src.core.database import close_db, init_db
 from src.core.exceptions import AutoFlowException
 from src.core.logging import get_logger, setup_logging
+from src.services.notify_listener_service import listen_for_transactions
 
 # Setup logging
 setup_logging()
@@ -25,23 +27,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan events."""
     # Startup
     logger.info("Starting AutoFlow Backend", version=settings.APP_VERSION)
-    
-    # Initialize database
+
     await init_db()
     logger.info("Database initialized")
-    
-    # Connect to Redis
+
     await cache.connect()
     logger.info("Redis connected")
-    
+
+    # Запускаем LISTEN воркер в фоне                    ← добавить блок
+    listener_task = asyncio.create_task(listen_for_transactions())
+    logger.info("Transaction listener started")
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down AutoFlow Backend")
+
+    # Останавливаем воркер                              ← добавить блок
+    listener_task.cancel()
+    try:
+        await listener_task
+    except asyncio.CancelledError:
+        pass
+
     await cache.disconnect()
     await close_db()
     logger.info("Shutdown complete")
-
 
 def create_app() -> FastAPI:
     """Create and configure FastAPI application."""

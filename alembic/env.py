@@ -1,22 +1,21 @@
 # alembic/env.py
 from __future__ import annotations
-
-import asyncio
-from logging.config import fileConfig
+import asyncio  # ← отсутствует
+from logging.config import fileConfig  # ← отсутствует
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.engine import Connection
 
-from src.config import settings                     # <-- твой конфиг
-from src.models.base import Base                    # <-- общий Base
+from src.config import settings
+from src.models.base import Base
 from src.models.user import User
-
 from src.models.account import Account
 from src.models.category import Category
 from src.models.transaction import Transaction
 from src.models.budget import Budget
+from src.models.telegram_link_token import TelegramLinkToken  # ← добавить после создания модели
 
 config = context.config
 
@@ -25,12 +24,34 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# Указываем обе схемы
+target_metadata.schema_translate_map = None
+
 
 def get_url() -> str:
-    # здесь должен вернуться НЕПУСТОЙ URL вида:
-    # postgresql+asyncpg://user:pass@host:port/finances?options=-csearch_path%3Dfinances
     return settings.DATABASE_URL
 
+MANAGED_SCHEMAS = {"finances", "public"}
+
+
+def include_object(object, name, type_, reflected, compare_to):
+    """
+    Говорим Alembic какие объекты включать в миграции.
+    Всё что не в MANAGED_SCHEMAS — игнорируем.
+    """
+    # Для таблиц проверяем схему
+    if type_ == "table":
+        schema = object.schema if hasattr(object, "schema") else None
+        if schema not in MANAGED_SCHEMAS:
+            return False  # ← не трогаем bot, public и т.д.
+
+    # Для индексов и остального — берём схему из таблицы
+    if type_ in ("index", "unique_constraint", "foreign_key_constraint"):
+        table_schema = getattr(object.table, "schema", None)
+        if table_schema not in MANAGED_SCHEMAS:
+            return False
+
+    return True
 
 def run_migrations_offline() -> None:
     url = get_url()
@@ -41,8 +62,9 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         compare_server_default=True,
+        include_schemas=True,
+        include_object=include_object,
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
@@ -53,15 +75,15 @@ def do_run_migrations(connection: Connection) -> None:
         target_metadata=target_metadata,
         compare_type=True,
         compare_server_default=True,
+        include_schemas=True,
+        include_object=include_object,
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
 
 async def run_async_migrations() -> None:
     configuration = config.get_section(config.config_ini_section) or {}
-    # критично: подменяем URL из settings, а не берём пустой из ini
     configuration["sqlalchemy.url"] = get_url()
 
     connectable = async_engine_from_config(
@@ -82,7 +104,6 @@ def run_migrations() -> None:
         run_migrations_offline()
     else:
         asyncio.run(run_async_migrations())
-
 
 run_migrations()
 

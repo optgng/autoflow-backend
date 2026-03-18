@@ -11,7 +11,6 @@ from src.models.category import Category  # убедитесь, что есть 
 # Dependent модели после
 from src.models.budget import Budget
 from src.models.transaction import Transaction
-from src.models.legacy import LegacyAccount, LegacyTransaction, LegacyUser
 
 __all__ = [
     "Base",
@@ -21,9 +20,5 @@ __all__ = [
     "Category",
     "Transaction",
     "Budget",
-    # Legacy модели (finance schema, read-only)
-    "LegacyUser",
-    "LegacyAccount",
-    "LegacyTransaction",
 ]
 
