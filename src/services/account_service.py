@@ -160,7 +160,7 @@ class AccountService:
 
         # --- Страховка: убираем поля, которых нет в AccountUpdate ---
         # (на случай если repo.update принимает **kwargs)
-        FORBIDDEN = {"balance", "last_four_digits", "account_number", "user_id"}
+        FORBIDDEN = {"last_four_digits", "account_number", "user_id"}
         for field in FORBIDDEN:
             update_data.pop(field, None)
 

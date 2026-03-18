@@ -124,6 +124,12 @@ class ImportService:
         self.session.add(tx)
         await self.session.flush()
 
+        if row.get('balance') is not None:
+            await self.session.execute(
+                text("UPDATE finances.accounts SET balance = :balance, updated_at = NOW() WHERE id = :id"),
+                {'balance': Decimal(str(row['balance'])), 'id': account.id}
+            )
+
     # ------------------------------------------------------------------ #
     # Резолв счёта                                                         #
     # ------------------------------------------------------------------ #

@@ -150,17 +150,16 @@ class TransactionService:
         filters: TransactionFilters,
         pagination: PaginationParams,
     ) -> PaginatedResponse:
-        """
-        Get user transactions with filters and pagination.
-        
-        Args:
-            user_id: User ID
-            filters: Filter parameters
-            pagination: Pagination parameters
-            
-        Returns:
-            Paginated transactions
-        """
+        # Получаем total отдельным COUNT-запросом
+        total = await self.transaction_repo.count_user_transactions(
+            user_id=user_id,
+            account_id=filters.account_id,
+            category_id=filters.category_id,
+            transaction_type=filters.transaction_type,
+            date_from=filters.date_from,
+            date_to=filters.date_to,
+        )
+
         transactions = await self.transaction_repo.get_user_transactions(
             user_id=user_id,
             account_id=filters.account_id,
@@ -171,18 +170,15 @@ class TransactionService:
             skip=pagination.offset,
             limit=pagination.limit,
         )
-        
-        # Count total (simplified - could be optimized)
-        total = len(transactions)  # In production, use separate count query
-        
+
         items = [TransactionResponse.model_validate(tx) for tx in transactions]
-        
         return PaginatedResponse.create(
             items=items,
-            total=total,
+            total=total,           # ← теперь реальный total
             page=pagination.page,
             page_size=pagination.page_size,
         )
+
 
     async def update_transaction(
         self, transaction_id: int, user_id: int, data: TransactionUpdate

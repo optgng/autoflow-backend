@@ -228,4 +228,33 @@ class TransactionRepository(BaseRepository[Transaction]):
         
         result = await self.session.execute(query)
         return list(result.scalars().all())
+    
+    async def count_user_transactions(
+        self,
+        user_id: int,
+        account_id: int | None = None,
+        category_id: int | None = None,
+        transaction_type: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> int:
+        from src.models.account import Account
+        query = (
+            select(func.count(Transaction.id))
+            .join(Account, Transaction.account_id == Account.id)
+            .where(Account.user_id == user_id)
+        )
+        if account_id:
+            query = query.where(Transaction.account_id == account_id)
+        if category_id:
+            query = query.where(Transaction.category_id == category_id)
+        if transaction_type:
+            query = query.where(Transaction.transaction_type == transaction_type)
+        if date_from:
+            query = query.where(Transaction.transaction_date >= date_from)
+        if date_to:
+            query = query.where(Transaction.transaction_date <= date_to)
+        result = await self.session.execute(query)
+        return result.scalar_one()
+
 

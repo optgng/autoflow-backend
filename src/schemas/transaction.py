@@ -14,6 +14,14 @@ from src.schemas.category import CategoryResponse
 
 TransactionType = Literal["income", "expense", "transfer"]
 
+class AccountShort(BaseSchema):
+    id: int
+    name: str
+
+class CategoryShort(BaseSchema):
+    id: int
+    name: str
+
 
 class TransactionBase(BaseSchema):
     """Базовые поля транзакции."""
@@ -82,6 +90,8 @@ class TransactionResponse(TransactionBase, TimestampSchema):
     
     id: int
     target_account_id: int | None
+    account: AccountShort | None = None      # ← добавить
+    category: CategoryShort | None = None
 
 
 class TransactionDetail(TransactionResponse):
