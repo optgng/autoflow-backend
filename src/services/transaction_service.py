@@ -158,6 +158,7 @@ class TransactionService:
             transaction_type=filters.transaction_type,
             date_from=filters.date_from,
             date_to=filters.date_to,
+            search=filters.search,
         )
 
         transactions = await self.transaction_repo.get_user_transactions(
@@ -167,6 +168,7 @@ class TransactionService:
             transaction_type=filters.transaction_type,
             date_from=filters.date_from,
             date_to=filters.date_to,
+            search=filters.search,
             skip=pagination.offset,
             limit=pagination.limit,
         )

@@ -58,52 +58,68 @@ class ImportService:
             return 0
 
         imported = 0
+        last_balances: dict[str, Decimal] = {}
+
         for row in pending:
             try:
                 await self._process_row(user, dict(row))
                 await self.session.execute(
                     text("""
                         UPDATE bot.finance_transactions
-                        SET import_status = 'done',
-                            imported_at   = NOW()
+                        SET import_status = 'done', imported_at = NOW()
                         WHERE id = :id
                     """),
                     {"id": row["id"]},
                 )
                 imported += 1
+                acc_num = row.get("account_number", "")
+                if row.get("balance") is not None:
+                    last_balances[acc_num] = Decimal(str(row.get("balance", 0)))
             except Exception as e:
                 logger.error(f"Ошибка импорта строки id={row['id']}: {e}")
                 await self.session.execute(
-                    text("""
-                        UPDATE bot.finance_transactions
-                        SET import_status = 'error'
-                        WHERE id = :id
-                    """),
+                    text("UPDATE bot.finance_transactions SET import_status = 'error' WHERE id = :id"),
                     {"id": row["id"]},
                 )
 
+        # Финальное обновление балансов — только ОДИН раз, через raw SQL
+        # Минуем ORM-кэш полностью
+        for account_number, final_balance in last_balances.items():
+            logger.info(f"Updating balance for {account_number}: {final_balance}")
+            await self.session.execute(
+                text("""
+                    UPDATE finances.accounts
+                    SET balance = :balance, updated_at = NOW()
+                    WHERE account_number = :account_number
+                      AND user_id = :user_id
+                """),
+                {
+                    "balance": final_balance,
+                    "account_number": account_number,
+                    "user_id": user.id,
+                },
+            )
+
         await self.session.commit()
+
         logger.info(f"Импортировано {imported} транзакций для telegram_id={telegram_id}")
         return imported
-
     # ------------------------------------------------------------------ #
     # Обработка одной строки                                               #
     # ------------------------------------------------------------------ #
 
     async def _process_row(self, user: User, row: dict) -> None:
-
-        # Дедупликация по auth_code
         if row.get("auth_code"):
             dup = await self.session.execute(
                 select(Transaction).where(
-                    Transaction.user_id     == user.id,
+                    Transaction.user_id == user.id,
                     Transaction.external_id == row["auth_code"],
                 )
             )
             if dup.scalar_one_or_none():
                 return
 
-        account  = await self._resolve_account(user, row)
+        account = await self._resolve_account(user, row)
         category = await self._resolve_category(user, row)
 
         tx_date = row["date_msk"]
@@ -111,25 +127,18 @@ class ImportService:
             tx_date = date.fromisoformat(tx_date)
 
         tx = Transaction(
-            user_id          = user.id,
-            account_id       = account.id,
-            category_id      = category.id if category else None,
-            transaction_date = tx_date,
-            amount           = Decimal(str(row["amount"])),
-            transaction_type = row["tx_type"],
-            merchant         = row.get("merchant"),
-            external_id      = row.get("auth_code"),
-            import_source    = "sber_pdf",
+            user_id=user.id,
+            account_id=account.id,
+            category_id=category.id if category else None,
+            transaction_date=tx_date,
+            amount=Decimal(str(row["amount"])),
+            transaction_type=row["tx_type"],
+            merchant=row.get("merchant"),
+            external_id=row.get("auth_code"),
+            import_source="sber_pdf",
         )
         self.session.add(tx)
         await self.session.flush()
-
-        if row.get('balance') is not None:
-            await self.session.execute(
-                text("UPDATE finances.accounts SET balance = :balance, updated_at = NOW() WHERE id = :id"),
-                {'balance': Decimal(str(row['balance'])), 'id': account.id}
-            )
-
     # ------------------------------------------------------------------ #
     # Резолв счёта                                                         #
     # ------------------------------------------------------------------ #
@@ -166,7 +175,7 @@ class ImportService:
             name             = f"Сбер ****{last4}",
             account_type     = "card",
             currency         = "RUB",
-            balance          = Decimal(str(row.get("balance", 0))),
+            balance          = Decimal(0),
             bank_name        = "Сбербанк",
             last_four_digits = last4,
             account_number   = account_number,

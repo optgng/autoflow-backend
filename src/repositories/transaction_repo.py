@@ -26,27 +26,12 @@ class TransactionRepository(BaseRepository[Transaction]):
         transaction_type: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        search: str | None = None,   # ← ДОБАВЛЕНО
         skip: int = 0,
         limit: int = 100,
     ) -> list[Transaction]:
-        """
-        Get transactions with filters.
-        
-        Args:
-            user_id: User ID (for security)
-            account_id: Filter by account
-            category_id: Filter by category
-            transaction_type: Filter by type
-            date_from: Start date
-            date_to: End date
-            skip: Offset
-            limit: Limit
-            
-        Returns:
-            List of transactions
-        """
         from src.models.account import Account
-        
+
         query = (
             select(Transaction)
             .join(Account, Transaction.account_id == Account.id)
@@ -57,28 +42,35 @@ class TransactionRepository(BaseRepository[Transaction]):
                 selectinload(Transaction.target_account),
             )
         )
-        
+
         if account_id:
             query = query.where(Transaction.account_id == account_id)
-        
         if category_id:
             query = query.where(Transaction.category_id == category_id)
-        
         if transaction_type:
             query = query.where(Transaction.transaction_type == transaction_type)
-        
         if date_from:
             query = query.where(Transaction.transaction_date >= date_from)
-        
         if date_to:
             query = query.where(Transaction.transaction_date <= date_to)
-        
+
+        # ← ДОБАВЛЕНО: поиск по merchant, description, notes
+        if search:
+            term = f"%{search}%"
+            query = query.where(
+                or_(
+                    Transaction.merchant.ilike(term),
+                    Transaction.description.ilike(term),
+                    Transaction.notes.ilike(term),
+                )
+            )
+
         query = query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
         query = query.offset(skip).limit(limit)
-        
+
         result = await self.session.execute(query)
         return list(result.scalars().all())
-
+    
     async def get_total_by_type(
         self,
         user_id: int,
@@ -237,8 +229,10 @@ class TransactionRepository(BaseRepository[Transaction]):
         transaction_type: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        search: str | None = None,   # ← ДОБАВЛЕНО
     ) -> int:
         from src.models.account import Account
+
         query = (
             select(func.count(Transaction.id))
             .join(Account, Transaction.account_id == Account.id)
@@ -254,7 +248,18 @@ class TransactionRepository(BaseRepository[Transaction]):
             query = query.where(Transaction.transaction_date >= date_from)
         if date_to:
             query = query.where(Transaction.transaction_date <= date_to)
+
+        # ← ДОБАВЛЕНО
+        if search:
+            term = f"%{search}%"
+            query = query.where(
+                or_(
+                    Transaction.merchant.ilike(term),
+                    Transaction.description.ilike(term),
+                    Transaction.notes.ilike(term),
+                )
+            )
+
         result = await self.session.execute(query)
         return result.scalar_one()
-
 
