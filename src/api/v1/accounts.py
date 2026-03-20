@@ -118,3 +118,12 @@ async def delete_account(
     except AuthorizationError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
+@router.get("/balances-by-currency")
+async def get_balances_by_currency(
+    current_user: CurrentUser,
+    session: DBSession,
+) -> dict:
+    """Баланс по каждой валюте — для мультивалютного отображения."""
+    service = AccountService(session)
+    balances = await service.get_balances_by_currency(current_user.id)
+    return {"balances": {k: str(v) for k, v in balances.items()}}

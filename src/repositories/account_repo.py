@@ -119,26 +119,16 @@ class AccountRepository(BaseRepository[Account]):
         
         return await self.update(account_id, balance=new_balance)
 
-    async def get_accounts_by_currency(
-        self, user_id: int, currency: str
-    ) -> list[Account]:
-        """
-        Get accounts by currency.
-        
-        Args:
-            user_id: User ID
-            currency: Currency code
-            
-        Returns:
-            List of accounts
-        """
+    async def get_balances_by_currency(self, user_id: int) -> dict[str, Decimal]:
+        """Суммы по каждой валюте для активных счетов пользователя."""
         result = await self.session.execute(
-            select(Account)
+            select(Account.currency, func.sum(Account.balance))
             .where(Account.user_id == user_id)
-            .where(Account.currency == currency)
-            .where(Account.is_active == True)  # noqa: E712
+            .where(Account.is_active == True)
+            .where(Account.include_in_total == True)
+            .group_by(Account.currency)
         )
-        return list(result.scalars().all())
+        return {row[0]: (row[1] or Decimal("0.00")) for row in result.all()}
 
     async def get_by_account_number(
         self, user_id: int, account_number: str

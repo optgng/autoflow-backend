@@ -112,6 +112,9 @@ class AccountService:
         self, user_id: int, currency: str = "RUB"
     ) -> Decimal:
         return await self.account_repo.get_total_balance(user_id, currency)
+    
+    async def get_balances_by_currency(self, user_id: int) -> dict[str, Decimal]:
+        return await self.account_repo.get_balances_by_currency(user_id)
 
     # ------------------------------------------------------------------ #
     # Update                                                               #
