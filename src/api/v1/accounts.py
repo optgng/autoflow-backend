@@ -9,6 +9,10 @@ from src.api.deps import CurrentUser, DBSession
 from src.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from src.schemas.account import AccountCreate, AccountResponse, AccountUpdate
 from src.services.account_service import AccountService
+from decimal import Decimal
+from typing import Dict
+from sqlalchemy import func, select
+from src.models.account import Account
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
 
@@ -67,6 +71,25 @@ async def get_accounts_by_type(
     service = AccountService(session)
     return await service.get_accounts_by_type(current_user.id, account_type)
 
+@router.get("/balances-by-currency")
+async def get_balances_by_currency(
+    current_user: CurrentUser,
+    session: DBSession,
+) -> Dict:
+    """
+    Суммарный баланс по каждой валюте отдельно.
+    USD-наличные не суммируются с RUB — фронт отображает их раздельно.
+    """
+    result = await session.execute(
+        select(Account.currency, func.sum(Account.balance))
+        .where(Account.user_id == current_user.id)
+        .where(Account.is_active == True)        # noqa: E712
+        .where(Account.include_in_total == True)  # noqa: E712
+        .group_by(Account.currency)
+    )
+    balances = {row[0]: str(row[1] or Decimal("0.00")) for row in result.all()}
+    return {"balances": balances}
+
 
 @router.get("/{account_id}", response_model=AccountResponse)
 async def get_account(
@@ -117,13 +140,3 @@ async def delete_account(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except AuthorizationError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
-
-@router.get("/balances-by-currency")
-async def get_balances_by_currency(
-    current_user: CurrentUser,
-    session: DBSession,
-) -> dict:
-    """Баланс по каждой валюте — для мультивалютного отображения."""
-    service = AccountService(session)
-    balances = await service.get_balances_by_currency(current_user.id)
-    return {"balances": {k: str(v) for k, v in balances.items()}}
