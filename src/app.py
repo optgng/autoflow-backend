@@ -1,13 +1,15 @@
-"""
-FastAPI application factory.
-"""
-from contextlib import asynccontextmanager
+"""FastAPI application factory with security hardening (SEC-04, SEC-09)."""
 import asyncio
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.api.v1.router import api_router
 from src.config import settings
@@ -17,46 +19,44 @@ from src.core.exceptions import AutoFlowException
 from src.core.logging import get_logger, setup_logging
 from src.services.notify_listener_service import listen_for_transactions
 
-# Setup logging
 setup_logging()
 logger = get_logger(__name__)
+limiter = Limiter(key_func=get_remote_address)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to every response (SEC-09)."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=()"
+        if settings.ENVIRONMENT == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan events."""
-    # Startup
     logger.info("Starting AutoFlow Backend", version=settings.APP_VERSION)
-
     await init_db()
-    logger.info("Database initialized")
-
     await cache.connect()
-    logger.info("Redis connected")
-
-    # Запускаем LISTEN воркер в фоне                    ← добавить блок
     listener_task = asyncio.create_task(listen_for_transactions())
-    logger.info("Transaction listener started")
-
     yield
-
-    # Shutdown
-    logger.info("Shutting down AutoFlow Backend")
-
-    # Останавливаем воркер                              ← добавить блок
     listener_task.cancel()
     try:
         await listener_task
     except asyncio.CancelledError:
         pass
-
     await cache.disconnect()
     await close_db()
     logger.info("Shutdown complete")
 
+
 def create_app() -> FastAPI:
-    """Create and configure FastAPI application."""
-    
     app = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
@@ -65,46 +65,36 @@ def create_app() -> FastAPI:
         redoc_url=f"{settings.API_V1_PREFIX}/redoc",
         lifespan=lifespan,
     )
-    
-    # Setup CORS
+
+    # SEC-09: Security headers
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    # SEC-04: Explicit CORS methods and headers (no wildcards)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.BACKEND_CORS_ORIGINS,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     )
-    
-    # Exception handler for custom exceptions
+
+    # SEC-02: Rate limiter state
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
     @app.exception_handler(AutoFlowException)
-    async def autoflow_exception_handler(
-        request: Request, exc: AutoFlowException
-    ) -> JSONResponse:
-        """Handle custom AutoFlow exceptions."""
+    async def autoflow_exception_handler(request: Request, exc: AutoFlowException) -> JSONResponse:
         return JSONResponse(
             status_code=exc.status_code,
-            content={
-                "detail": exc.message,
-                "error_data": exc.detail,
-            },
+            content={"detail": exc.message, "error_data": exc.detail},
         )
-    
-    # Health check endpoint
+
     @app.get("/health")
     async def health_check() -> dict[str, str]:
-        """Health check endpoint."""
-        return {
-            "status": "healthy",
-            "version": settings.APP_VERSION,
-            "environment": settings.ENVIRONMENT,
-        }
-    
-    # Include API routers
+        return {"status": "healthy", "version": settings.APP_VERSION, "environment": settings.ENVIRONMENT}
+
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
-    
     return app
 
 
-# Create app instance
 app = create_app()
-

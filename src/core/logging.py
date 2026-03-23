@@ -1,51 +1,37 @@
-"""
-Structured logging setup.
-"""
+"""Logging setup with PII redaction filter (SEC-11)."""
 import logging
-import sys
-
 import structlog
 
-from src.config import settings
+SENSITIVE_FIELDS = {
+    "password", "hashed_password", "access_token", "refresh_token",
+    "token", "merchant", "account_number", "telegram_id",
+    "auth_code", "card_number", "phone",
+}
+
+
+def redact_sensitive(logger, method, event_dict: dict) -> dict:
+    """structlog processor: replace sensitive field values with ***REDACTED***."""
+    for key in list(event_dict.keys()):
+        if key.lower() in SENSITIVE_FIELDS:
+            event_dict[key] = "***REDACTED***"
+    return event_dict
 
 
 def setup_logging() -> None:
-    """Configure structured logging."""
-    if settings.LOG_FORMAT == "json":
-        processors = [
-            structlog.contextvars.merge_contextvars,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer(),
-        ]
-    else:
-        processors = [
-            structlog.contextvars.merge_contextvars,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S"),
-            structlog.dev.ConsoleRenderer(),
-        ]
-
     structlog.configure(
-        processors=processors,
+        processors=[
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.add_logger_name,
+            structlog.processors.TimeStamper(fmt="iso"),
+            redact_sensitive,
+            structlog.processors.JSONRenderer(),
+        ],
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
     )
-
-    logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stdout,
-        level=getattr(logging, settings.LOG_LEVEL),
-    )
+    logging.basicConfig(level=logging.INFO)
 
 
-def get_logger(name: str) -> structlog.stdlib.BoundLogger:
-    """Get logger instance."""
+def get_logger(name: str = __name__):
     return structlog.get_logger(name)
-
