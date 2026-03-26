@@ -12,13 +12,17 @@ from src.models.category import Category  # убедитесь, что есть 
 from src.models.budget import Budget
 from src.models.transaction import Transaction
 
+from src.models.habit import Habit
+from src.models.habit_log import HabitLog
+
 __all__ = [
     "Base",
-    # Новые модели (finances schema)
     "User",
     "Account",
     "Category",
     "Transaction",
     "Budget",
+    "Habit",
+    "HabitLog",
 ]
 

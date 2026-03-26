@@ -3,7 +3,7 @@ Main API v1 router.
 """
 from fastapi import APIRouter
 
-from src.api.v1 import accounts, auth, categories, dashboard, transactions, users, telegram
+from src.api.v1 import accounts, auth, categories, dashboard, transactions, users, telegram, habits
 
 api_router = APIRouter()
 

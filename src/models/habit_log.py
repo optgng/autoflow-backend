@@ -1,17 +1,20 @@
-from sqlalchemy import Column, Integer, ForeignKey, Date, Boolean, UniqueConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy import ForeignKey, Date, Boolean, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from datetime import date
 from src.models.base import Base
 
 class HabitLog(Base):
     __tablename__ = "habit_logs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    habit_id = Column(Integer, ForeignKey("habits.id", ondelete="CASCADE"), nullable=False)
-    date = Column(Date, nullable=False)
-    is_completed = Column(Boolean, default=True)
-
+    # Кортеж для комбинации Constraints и аргументов таблицы
     __table_args__ = (
         UniqueConstraint('habit_id', 'date', name='uq_habit_date'),
+        {"schema": "finances"}
     )
 
-    habit = relationship("Habit", back_populates="logs")
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    # Ссылка на таблицу habits внутри схемы finances
+    habit_id: Mapped[int] = mapped_column(ForeignKey("finances.habits.id", ondelete="CASCADE"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    is_completed: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    habit: Mapped["Habit"] = relationship("Habit", back_populates="logs")
