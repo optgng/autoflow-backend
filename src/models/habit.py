@@ -1,7 +1,8 @@
-from sqlalchemy import ForeignKey, String, Enum, Integer, Float
+from sqlalchemy import ForeignKey, String, Enum, Integer, Float, Date
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional
+from datetime import date as date_type
 import enum
 from src.models.base import Base, TimestampMixin
 
@@ -35,14 +36,21 @@ class Habit(Base, TimestampMixin):
         Enum(HabitFrequency, schema="finances"), default=HabitFrequency.daily
     )
 
-    # Шаг 1
+    # Step 1
     current_streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     habit_strength: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
-    # Шаг 2
+    # Step 2 – type & schedule
     habit_type: Mapped[str] = mapped_column(String(10), default="good", nullable=False)
     time_of_day: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     repeat_days: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+
+    # Step 2 – dates
+    start_date: Mapped[Optional[date_type]] = mapped_column(Date, nullable=True)
+    end_date: Mapped[Optional[date_type]] = mapped_column(Date, nullable=True)
+    end_after_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    interval_start: Mapped[Optional[date_type]] = mapped_column(Date, nullable=True)
+    interval_end: Mapped[Optional[date_type]] = mapped_column(Date, nullable=True)
 
     logs: Mapped[list["HabitLog"]] = relationship(
         "HabitLog", back_populates="habit", cascade="all, delete-orphan"

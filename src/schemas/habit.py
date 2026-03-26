@@ -4,9 +4,9 @@ from datetime import date
 from src.models.habit import HabitFrequency
 
 
-# Допустимые значения для time_of_day и habit_type
 TimeOfDayValue = Literal["morning", "afternoon", "evening"]
 HabitTypeValue = Literal["good", "bad"]
+EndCondition = Literal["never", "by_date", "after_n"]
 
 
 class HabitBase(BaseModel):
@@ -16,10 +16,16 @@ class HabitBase(BaseModel):
     icon: Optional[str] = "target"
     frequency: HabitFrequency = HabitFrequency.daily
 
-    # Новые поля
     habit_type: HabitTypeValue = "good"
     time_of_day: Optional[List[TimeOfDayValue]] = None
     repeat_days: Optional[List[int]] = None  # [0..6], 0 = Пн
+
+    # Dates
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    end_after_count: Optional[int] = None
+    interval_start: Optional[date] = None
+    interval_end: Optional[date] = None
 
     @field_validator("repeat_days")
     @classmethod
@@ -45,6 +51,11 @@ class HabitUpdate(BaseModel):
     habit_type: Optional[HabitTypeValue] = None
     time_of_day: Optional[List[TimeOfDayValue]] = None
     repeat_days: Optional[List[int]] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    end_after_count: Optional[int] = None
+    interval_start: Optional[date] = None
+    interval_end: Optional[date] = None
 
 
 class HabitLogResponse(BaseModel):
