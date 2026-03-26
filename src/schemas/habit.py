@@ -3,6 +3,7 @@ from typing import Optional, List
 from datetime import date
 from src.models.habit import HabitFrequency
 
+
 class HabitBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -10,8 +11,10 @@ class HabitBase(BaseModel):
     icon: Optional[str] = "target"
     frequency: HabitFrequency = HabitFrequency.daily
 
+
 class HabitCreate(HabitBase):
     pass
+
 
 class HabitUpdate(BaseModel):
     name: Optional[str] = None
@@ -21,16 +24,18 @@ class HabitUpdate(BaseModel):
     frequency: Optional[HabitFrequency] = None
     current_streak: int = 0
 
+
 class HabitLogResponse(BaseModel):
     id: int
     date: date
     is_completed: bool
     model_config = ConfigDict(from_attributes=True)
 
+
 class HabitResponse(HabitBase):
     id: int
     user_id: int
     current_streak: int = 0
+    habit_strength: float = 0.0      # <-- новое поле
     logs: List[HabitLogResponse] = []
     model_config = ConfigDict(from_attributes=True)
-

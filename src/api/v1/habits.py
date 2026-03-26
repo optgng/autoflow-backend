@@ -6,6 +6,7 @@ from src.api.deps import CurrentUser, DBSession
 from src.schemas.habit import HabitCreate, HabitUpdate, HabitResponse
 from src.models.habit_log import HabitLog
 from src.utils.streak import compute_current_streak
+from src.utils.habit_strength import compute_habit_strength  # <-- новый импорт
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from src.repositories.habit_repo import HabitRepository
@@ -15,22 +16,25 @@ from src.models.habit_log import HabitLog
 
 router = APIRouter(prefix="/habits", tags=["Habits"])
 
+
 @router.get("/", response_model=List[HabitResponse])
 async def get_habits(current_user: CurrentUser, session: DBSession):
     habit_repo = HabitRepository(session)
     start_date = date.today() - timedelta(days=14)
     return await habit_repo.get_user_habits_with_logs(current_user.id, start_date)
 
+
 @router.post("/", response_model=HabitResponse, status_code=status.HTTP_201_CREATED)
-async def create_habit(habit_in: HabitCreate, current_user: CurrentUser, session: DBSession):
+async def create_habit(
+    habit_in: HabitCreate, current_user: CurrentUser, session: DBSession
+):
     habit_repo = HabitRepository(session)
     habit = await habit_repo.create(**habit_in.model_dump(), user_id=current_user.id)
     result = await session.execute(
-        select(Habit)
-        .where(Habit.id == habit.id)
-        .options(selectinload(Habit.logs))
+        select(Habit).where(Habit.id == habit.id).options(selectinload(Habit.logs))
     )
     return result.scalar_one()
+
 
 @router.post("/{habit_id}/toggle")
 async def toggle_habit(
@@ -42,7 +46,6 @@ async def toggle_habit(
     if target_date is None:
         target_date = date.today()
 
-    # with_for_update живёт ЗДЕСЬ — habit_id и current_user доступны
     result = await session.execute(
         select(Habit)
         .where(Habit.id == habit_id, Habit.user_id == current_user.id)
@@ -64,11 +67,20 @@ async def toggle_habit(
         is_completed = True
 
     await session.flush()
-    from src.utils.streak import compute_current_streak
+
+    # Пересчёт стрейка и силы привычки
     habit.current_streak = compute_current_streak(habit.logs)
+    habit.habit_strength = compute_habit_strength(habit.logs, target_date)
+
     await session.commit()
 
-    return {"status": "ok", "is_completed": is_completed, "current_streak": habit.current_streak}
+    return {
+        "status": "ok",
+        "is_completed": is_completed,
+        "current_streak": habit.current_streak,
+        "habit_strength": habit.habit_strength,
+    }
+
 
 @router.get("/activity/summary")
 async def get_activity_summary(
@@ -101,13 +113,16 @@ async def get_activity_summary(
         for i in range(days)
     ]
 
+
 @router.delete("/{habit_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_habit(habit_id: int, current_user: CurrentUser, session: DBSession):
     habit_repo = HabitRepository(session)
     habit = await habit_repo.get_by_id(id=habit_id)
-    
+
     if not habit or habit.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found")
-        
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
+        )
+
     await habit_repo.delete(id=habit_id)
     return None
