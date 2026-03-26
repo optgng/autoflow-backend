@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import date
 from src.models.habit import HabitFrequency
@@ -19,19 +19,18 @@ class HabitUpdate(BaseModel):
     color: Optional[str] = None
     icon: Optional[str] = None
     frequency: Optional[HabitFrequency] = None
+    current_streak: int = 0
 
 class HabitLogResponse(BaseModel):
     id: int
     date: date
     is_completed: bool
-
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class HabitResponse(HabitBase):
     id: int
     user_id: int
+    current_streak: int = 0
     logs: List[HabitLogResponse] = []
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        from_attributes = True
