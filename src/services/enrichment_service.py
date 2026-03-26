@@ -122,13 +122,30 @@ async def enrich_transactions(
     for tx in transactions:
         tx_dict = _tx_to_dict(tx)
         rule_result = apply_rules(tx_dict)
+        
+        if settings.PIPELINE_LOG_VERBOSE:
+            logger.info(
+                f"[RULE ENGINE] tx_id={tx.id} merchant='{tx.merchant}' "
+                f"→ {'MATCH: ' + str(rule_result) if rule_result else 'no match'}"
+            )
+
         if rule_result:
             await _apply_enrichment(session, tx.id, rule_result, source="rule", confidence=Decimal("1.00"))
             rule_resolved.append(tx)
         else:
             llm_pending.append(tx)
 
+    if settings.PIPELINE_LOG_VERBOSE:
+        logger.info(f"[PIPELINE] Rule resolved: {len(rule_resolved)}, LLM pending: {len(llm_pending)}")
+
     # Phase 2: LLM batch
+    if not settings.PIPELINE_LLM or not llm_pending:
+        if settings.PIPELINE_LOG_VERBOSE and llm_pending:
+            logger.info(f"[PIPELINE] LLM disabled, {len(llm_pending)} transactions left unenriched")
+        await session.commit()
+        return
+
+
     for i in range(0, len(llm_pending), BATCH_SIZE):
         batch = llm_pending[i : i + BATCH_SIZE]
         batch_dicts = [_tx_to_dict(tx) for tx in batch]

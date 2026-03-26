@@ -25,7 +25,7 @@ async def generate_link(
     """Генерирует deep link для привязки Telegram. Действует 10 минут."""
     service = TelegramService(session)
     token = await service.generate_link_token(current_user.id)
-    deep_link = f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start=auth{token.token}"
+    deep_link = f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start=auth_{token.token}"
     return GenerateLinkResponse(deep_link=deep_link, token=token.token, expires_at=token.expires_at)
 
 

@@ -8,9 +8,9 @@ from pydantic import BaseModel
 
 class GenerateLinkResponse(BaseModel):
     """Ответ на генерацию deep link."""
-    deep_link: str        # https://t.me/ИМЯ_БОТА?start=auth_TOKEN
-    token: str            # сам токен (для отображения в UI если нужно)
-    expires_at: datetime  # когда истекает
+    deep_link: str        
+    token: str           
+    expires_at: datetime
 
 
 class TelegramLinkRequest(BaseModel):

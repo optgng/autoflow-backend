@@ -14,6 +14,9 @@ from src.models.transaction import Transaction
 from src.schemas.account import AccountResponse
 from src.services.account_service import AccountService
 from src.services.category_service import CategoryService
+from src.services.enrichment_service import enrich_transactions
+from src.services.settlement_detector import detect_settlements, extract_contact_ref
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +62,13 @@ class ImportService:
 
         imported = 0
         last_balances: dict[str, Decimal] = {}
-
+        imported_txs = []
+        
         for row in pending:
             try:
-                await self._process_row(user, dict(row))
+                tx = await self._process_row(user, dict(row))
+                if tx:
+                    imported_txs.append(tx)
                 await self.session.execute(
                     text("""
                         UPDATE bot.finance_transactions
@@ -102,6 +108,28 @@ class ImportService:
 
         await self.session.commit()
 
+        # ── Ensure user_keys salt exists ──────────────────────────
+        await self._ensure_user_salt(telegram_id)
+
+        # ── Phase 1: Rule Engine ──────────────────────────────────
+        if settings.PIPELINE_RULE_ENGINE and imported_txs:
+            if settings.PIPELINE_LOG_VERBOSE:
+                logger.info(f"[PIPELINE] Rule engine: {len(imported_txs)} transactions")
+            await enrich_transactions(self.session, imported_txs, telegram_id)
+
+        # ── Phase 2: Settlement Detector ─────────────────────────
+        if settings.PIPELINE_SETTLEMENT and imported_txs:
+            tx_dicts = [
+                {"id": tx.id, "merchant": tx.merchant, "txtype": tx.transaction_type,
+                 "amount": str(tx.amount), "date": str(tx.transaction_date)}
+                for tx in imported_txs
+            ]
+            from src.services.settlement_detector import detect_settlements
+            salt = await self._get_salt_bytes(telegram_id)
+            pairs = detect_settlements(tx_dicts, salt)
+            if pairs and settings.PIPELINE_LOG_VERBOSE:
+                logger.info(f"[PIPELINE] Settlement pairs found: {len(pairs)}")
+
         logger.info(f"Импортировано {imported} транзакций для telegram_id={telegram_id}")
         return imported
     # ------------------------------------------------------------------ #
@@ -117,7 +145,7 @@ class ImportService:
                 )
             )
             if dup.scalar_one_or_none():
-                return
+                return None
 
         account = await self._resolve_account(user, row)
         category = await self._resolve_category(user, row)
@@ -139,6 +167,7 @@ class ImportService:
         )
         self.session.add(tx)
         await self.session.flush()
+        return tx
     # ------------------------------------------------------------------ #
     # Резолв счёта                                                         #
     # ------------------------------------------------------------------ #
@@ -222,4 +251,37 @@ class ImportService:
             select(User).where(User.telegram_id == telegram_id)
         )
         return result.scalar_one_or_none()
+
+
+    # ------------------------------------------------------------------ #
+    # Соль пользователей                                                 #
+    # ------------------------------------------------------------------ #
+
+    async def _ensure_user_salt(self, telegram_id: int) -> None:
+        """Создаёт запись user_keys если её нет."""
+        from sqlalchemy import text
+        import secrets
+        existing = await self.session.execute(
+            text("SELECT id FROM finances.user_keys WHERE telegram_id = :tid"),
+            {"tid": telegram_id},
+        )
+        if not existing.fetchone():
+            salt = secrets.token_hex(32)  # 64-char hex
+            await self.session.execute(
+                text("INSERT INTO finances.user_keys (telegram_id, salt) VALUES (:tid, :salt)"),
+                {"tid": telegram_id, "salt": salt},
+            )
+            await self.session.commit()
+            logger.info(f"[PIPELINE] Created user_key salt for telegram_id={telegram_id}")
+
+    async def _get_salt_bytes(self, telegram_id: int) -> bytes:
+        from sqlalchemy import text
+        result = await self.session.execute(
+            text("SELECT salt FROM finances.user_keys WHERE telegram_id = :tid"),
+            {"tid": telegram_id},
+        )
+        row = result.fetchone()
+        if row:
+            return bytes.fromhex(row[0]) if isinstance(row[0], str) else row[0]
+        return settings.SECRET_KEY.encode()[:32]  # fallback
 

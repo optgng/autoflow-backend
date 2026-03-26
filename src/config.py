@@ -107,6 +107,12 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str | None = None
     TELEGRAM_BOT_USERNAME: str
 
+    # ── Pipeline feature flags (для отладки) ──────────────────────────
+    PIPELINE_RULE_ENGINE: bool = True     # вкл/выкл rule engine
+    PIPELINE_LLM: bool = False            # вкл/выкл LLM-обогащение (дорого, по умолчанию OFF)
+    PIPELINE_SETTLEMENT: bool = True      # вкл/выкл детектор взаимозачётов
+    PIPELINE_LOG_VERBOSE: bool = True    # подробные логи каждого шага pipeline
+
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
